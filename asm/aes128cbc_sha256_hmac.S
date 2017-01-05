@@ -83,9 +83,14 @@
  *
  * Constraints:
  *
- * The variable "len" must be a multiple of 16, otherwise results
+ * The variable "clen" must be a multiple of 16, otherwise results
  * are not defined. For AES partial blocks the user is required
  * to pad the input to modulus 16 = 0.
+ * The variable "dlen" must be a multiple of 8 and greater or equal
+ * to "clen". This constrain is strictly related to the needs of the IPSec
+ * ESP packet. Encrypted payload is hashed along with the 8 byte ESP header,
+ * forming ICV. Speed gain is achieved by doing both things at the same time,
+ * hence lengths are required to match at least at the cipher level.
  *
  * Short lengths are not optimized at < 12 AES blocks
  */
@@ -143,6 +148,10 @@ aes128cbc_sha256_hmac:
 	/* address of sha init state consts */
 	adr		x12,.Linit_sha_state
 	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
+	cmp		x5,x2			/* compare lengths */
+	b.lt		.Lerror			/* error: dlen < clen */
+	ands		x10,x5,#0x7		/* check 8B alignment */
+	b.ne		.Lerror			/* error: dlen % 8 != 0 */
 	lsr		x10,x2,4		/* aes_blocks = len/16 */
 	cmp		x10,12			/* no main loop if <12 */
 	b.lt		.Lshort_cases		/* branch if < 12 */
@@ -212,6 +221,7 @@ aes128cbc_sha256_hmac:
 	aese		v1.16b,v11.16b
 	/* save aes res, bump aes_out_ptr */
 	st1		{v0.16b},[x1],16
+	ld1		{v26.16b},[x3],16
 	aesmc		v1.16b,v1.16b
 	aese		v1.16b,v12.16b
 	prfm		PLDL1KEEP,[x8,2*64]	/* rcon */
@@ -245,6 +255,7 @@ aes128cbc_sha256_hmac:
 	aese		v2.16b,v11.16b
 	/* save aes res, bump aes_out_ptr */
 	st1		{v1.16b},[x1],16
+	ld1		{v27.16b},[x3],16
 	aesmc		v2.16b,v2.16b
 	aese		v2.16b,v12.16b
 	prfm		PLDL1KEEP,[x8,12*64]	/* rcon */
@@ -273,6 +284,7 @@ aes128cbc_sha256_hmac:
 	aese		v3.16b,v11.16b
 	/* save aes res, bump aes_out_ptr */
 	st1		{v2.16b},[x1],16
+	ld1		{v28.16b},[x3],16
 	aesmc		v3.16b,v3.16b
 	aese		v3.16b,v12.16b
 	aesmc		v3.16b,v3.16b
@@ -295,6 +307,12 @@ aes128cbc_sha256_hmac:
  */
 	/* save aes res, bump aes_out_ptr */
 	st1		{v3.16b},[x1],16
+	ld1		{v29.16b},[x3],16
+
+	/* get outstanding bytes of the digest */
+	sub		x12,x5,x2
+	/* substract loaded bytes */
+	sub		x5,x5,64
 
 /*
  * main combined loop CBC
@@ -308,12 +326,12 @@ aes128cbc_sha256_hmac:
  * before we can use the load anyway; so this goes as fast as it can without
  * SW pipelining (too complicated given the code size)
  */
-	rev32		v26.16b,v0.16b		/* fix endian w0, aes res 0 */
+	rev32		v26.16b,v26.16b
 	/* next aes block, update aes_ptr_in */
 	ld1		{v0.16b},[x0],16
 	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
 	prfm		PLDL1KEEP,[x9,64]	/* pref next lead_ptr */
-	rev32		v27.16b,v1.16b		/* fix endian w1, aes res 1 */
+	rev32		v27.16b,v27.16b
 	/* pref next aes_ptr_out, streaming  */
 	prfm		PLDL1KEEP,[x1,64]
 	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
@@ -325,7 +343,7 @@ aes128cbc_sha256_hmac:
  */
 	aese		v0.16b,v8.16b
 	ld1		{v6.16b},[x8],16	/* key2 */
-	rev32		v28.16b,v2.16b		/* fix endian w2, aes res 2 */
+	rev32		v28.16b,v28.16b
 	ld1		{v7.16b},[x8],16	/* key3  */
 	aesmc		v0.16b,v0.16b
 	/* read next aes block, update aes_ptr_in */
@@ -341,7 +359,7 @@ aes128cbc_sha256_hmac:
 	aese		v0.16b,v11.16b
 	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	/* no place to get rid of this stall */
-	rev32		v29.16b,v3.16b		/* fix endian w3, aes res 3 */
+	rev32		v29.16b,v29.16b
 	aesmc		v0.16b,v0.16b
 	sha256h2	q23, q21, v4.4s
 	aese		v0.16b,v12.16b
@@ -540,17 +558,23 @@ aes128cbc_sha256_hmac:
 	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 	/* save aes res, bump aes_out_ptr */
 	st1		{v3.16b},[x1],16
+
+	ldp		q26,q27,[x3],32
+	ldp		q28,q29,[x3],32
+	sub		x5,x5,64
+
 	cbnz		x15,.Lmain_loop		/* loop if more to do */
 
+	mov		w15,0x80		/* that's the 1 of the pad */
 /*
  * epilog, process remaining aes blocks and b-2 sha block
  * do this inline (no loop) to overlap with the sha part
  * note there are 0-3 aes blocks left.
  */
-	rev32		v26.16b,v0.16b		/* fix endian w0 */
-	rev32		v27.16b,v1.16b		/* fix endian w1 */
-	rev32		v28.16b,v2.16b		/* fix endian w2 */
-	rev32		v29.16b,v3.16b		/* fix endian w3 */
+	rev32		v26.16b,v26.16b		/* fix endian w0 */
+	rev32		v27.16b,v27.16b		/* fix endian w1 */
+	rev32		v28.16b,v28.16b		/* fix endian w2 */
+	rev32		v29.16b,v29.16b		/* fix endian w3 */
 	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
 	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
 	cbz		x13, .Lbm2fromQ0	/* skip if none left */
@@ -888,55 +912,297 @@ aes128cbc_sha256_hmac:
 	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
 	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 
-/*
- * now we can do the final block, either all padding or 1-3 aes blocks
- * len in x11, aes_blocks_left in x13. should move the aes data setup of this
- * to the last aes bit.
- */
+/* Process remaining 0-3 AES blocks here */
+	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
+	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
 
+	cbz		x13,.Lpost_long_Q0
+
+	/* 1st remaining AES block */
+	ld1		{v26.16b},[x3],16
+	sub		x5,x5,16
+	rev32		v26.16b,v26.16b
+	subs		x14,x13,1
+	b.eq		.Lpost_long_Q1
+
+	/* 2nd remaining AES block */
+	ld1		{v27.16b},[x3],16
+	sub		x5,x5,16
+	rev32		v27.16b,v27.16b
+	subs		x14,x14,1
+	b.eq		.Lpost_long_Q2
+
+	/* 3rd remaining AES block */
+	ld1		{v28.16b},[x3],16
+	sub		x5,x5,16
+	rev32		v28.16b,v28.16b
+	/* Allow for filling this sha256 block with the remaining digest src */
+	b		.Lpost_long_Q3
+/*
+ * Process remaining 8B blocks of the digest
+ */
+.Lpost_long_Q0:
+/* blk 0,1 */
+	/* assume final block */
+	mov		v26.b[3],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_long_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	/* overwrite previous v26 value (0x80) */
+	mov		v26.d[0],x2
+	/* assume this was final block */
+	mov		v26.b[11],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_long_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	mov		v26.d[1],x2
+
+.Lpost_long_Q1:
+/* blk 2,3 */
+	/* assume this is final block */
+	mov		v27.b[3],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_long_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	/* overwrite previous v27 value (0x80) */
+	mov		v27.d[0],x2
+	/* assume this was final block */
+	mov		v27.b[11],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_long_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	mov		v27.d[1],x2
+
+.Lpost_long_Q2:
+/* blk 4,5 */
+	/* assume this was final block */
+	mov		v28.b[3],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_long_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	/* overwrite previous v28 value (0x80) */
+	mov		v28.d[0],x2
+	/* assume this was final block */
+	mov		v28.b[11],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_long_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	mov		v28.d[1],x2
+
+.Lpost_long_Q3:
+/* blk 6,7 */
+	/* assume this was final block */
+	mov		v29.b[3],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_long_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	/* overwrite previous v29 value (0x80) */
+	mov		v29.d[0],x2
+	/* assume this was final block */
+	mov		v29.b[11],w15
+	/*
+	 * Outstanding 8B blocks left.
+	 * Since there has to be another sha block with padding,
+	 * we need to calculate hash without padding here.
+	 */
+	cbz		x5,1f
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	rev32		x2,x2
+	/*
+	 * Don't decrease x5 here.
+	 * Use it to indicate necessity of constructing "1" padding at the end.
+	 */
+	mov		v29.d[1],x2
+
+/*
+ * That is enough of blocks, we allow up to 64 bytes in total.
+ * Now we have the sha256 to do for these 4 16B blocks
+ */
+1:
 	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
-	mov		w15,0x80		/* that's the 1 of the pad */
-	/* Add one SHA-2 block since hash is calculated including i_key_pad */
-	add		x11, x11, #64
-	lsr		x12,x11,32		/* len_hi */
-	and		x9,x11,0xffffffff	/* len_lo */
 	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
-	mov		v26.b[0],w15		/* assume block 0 is dst */
-	lsl		x12,x12,3		/* len_hi in bits */
-	lsl		x9,x9,3			/* len_lo in bits */
-	eor		v29.16b,v29.16b,v29.16b	/* zero reg */
-/*
- * places the 0x80 in the correct block, copies the appropriate data
- */
-	cbz		x13,.Lpad100		/* no data to get */
-	mov		v26.16b,v0.16b
-	sub		x14,x13,1		/* dec amount left */
-	mov		v27.b[0],w15		/* assume block 1 is dst */
-	cbz		x14,.Lpad100		/* branch if done */
-	mov		v27.16b,v1.16b
-	sub		x14,x14,1		/* dec amount left */
-	mov		v28.b[0],w15		/* assume block 2 is dst */
-	cbz		x14,.Lpad100		/* branch if done */
-	mov		v28.16b,v2.16b
-	mov		v29.b[3],w15		/* block 3, doesn't get rev'd */
-/*
- * get the len_hi,LenLo in bits according to
- *     len_hi = (uint32_t)(((len>>32) & 0xffffffff)<<3); (x12)
- *     len_lo = (uint32_t)((len & 0xffffffff)<<3); (x9)
- * this is done before the if/else above
- */
-.Lpad100:
-	mov		v29.s[3],w9		/* len_lo */
-	mov		v29.s[2],w12		/* len_hi */
-/*
- * note that q29 is already built in the correct format, so no swap required
- */
-	rev32		v26.16b,v26.16b		/* fix endian w0 */
-	rev32		v27.16b,v27.16b		/* fix endian w1 */
-	rev32		v28.16b,v28.16b		/* fix endian w2 */
+	/* base address for sha round consts */
+	adr		x8,.Lrcon
+	ld1		{v4.16b},[x8],16	/* key0 */
+	ld1		{v5.16b},[x8],16	/* key1 */
+	ld1		{v6.16b},[x8],16	/* key2 */
+	ld1		{v7.16b},[x8],16	/* key3 */
+
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+
+	sha256su0	v26.4s,v27.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
+	sha256h2	q23, q21, v6.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
+	sha256h2	q23, q21, v7.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
+	sha256su0	v26.4s,v27.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
+	sha256h2	q23, q21, v6.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
+	sha256h2	q23, q21, v7.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
+	sha256su0	v26.4s,v27.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+	sha256h2	q23, q21, v6.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	sha256h2	q23, q21, v7.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+	sha256h2	q23, q21, v4.4s
+
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
+	sha256h2	q23, q21, v5.4s
+
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	sha256h2	q23, q21, v6.4s
+
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	sha256h2	q23, q21, v7.4s
+
+	add		v26.4s,v24.4s,v22.4s	/* ABCD += working copy */
+	add		v27.4s,v25.4s,v23.4s	/* EFGH += working copy */
+
+	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
+	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
+
+	/* this was final block */
+	cbz		x5,.Lpost_long_loop
+	subs		x5,x5,8
+	/* loop if hash is not finished */
+	b.ne		.Lpost_long_Q0
+	/* set "1" of the padding if this was a final block */
+	mov		v26.b[3],w15
+
+.Lpost_long_loop:
+	/* Add outstanding bytes of digest source */
+	add	x11,x11,x12
+	/* Add one SHA-256 block since hash is calculated including i_key_pad */
+	add	x11,x11, #64
+	lsr	x12,x11,32			/* len_hi */
+	and	x13,x11,0xffffffff		/* len_lo */
+	lsl	x12,x12,3			/* len_hi in bits */
+	lsl	x13,x13,3			/* len_lo in bits */
+
+	mov	v29.s[3],w13			/* len_lo */
+	mov	v29.s[2],w12			/* len_hi */
+
 /*
  * do last sha of pad block
  */
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
 /* quad 0 */
 	/* base address for sha round consts */
 	adr		x8,.Lrcon
@@ -1260,6 +1526,8 @@ aes128cbc_sha256_hmac:
 	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
 	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
+	/* get outstanding bytes of the digest */
+	sub		x12,x5,x2
 /*
  * the idea in the short loop (at least 1) is to break out with the padding
  * already in place excepting the final word.
@@ -1291,13 +1559,16 @@ aes128cbc_sha256_hmac:
 	aesmc		v0.16b,v0.16b
 	aese		v0.16b,v17.16b
 	eor		v0.16b,v0.16b,v18.16b
-	/* assume this was final block */
-	mov		v27.b[3],w15
+
 	/* save aes res, bump aes_out_ptr */
 	st1		{v0.16b},[x1],16
-	rev32		v26.16b,v0.16b	/* load res to sha 0, endian swap */
+	/* load next 16 bytes for SHA-256 */
+	ld1		{v26.16b},[x3],16
+	/* dec number of bytes of the hash input */
+	sub		x5,x5,16
+	rev32		v26.16b,v26.16b	/* load res to sha 0, endian swap */
 	sub		x10,x10,1		/* dec num_blocks */
-	cbz		x10,.Lpost_short_loop	/* break if no more */
+	cbz		x10,.Lpost_short_Q1	/* break if no more */
 	/* read next aes block, update aes_ptr_in */
 	ld1		{v1.16b},[x0],16
 	eor		v1.16b,v1.16b,v0.16b	/* xor w/prev value */
@@ -1323,13 +1594,16 @@ aes128cbc_sha256_hmac:
 	aesmc		v1.16b,v1.16b
 	aese		v1.16b,v17.16b
 	eor		v1.16b,v1.16b,v18.16b
-	/* assume this was final block */
-	mov		v28.b[3],w15
+
 	/* save aes res, bump aes_out_ptr */
 	st1		{v1.16b},[x1],16
-	rev32		v27.16b,v1.16b	/* load res to sha 0, endian swap */
+	/* load next 16 bytes for SHA-256 */
+	ld1		{v27.16b},[x3],16
+	/* dec number of bytes of the hash input */
+	sub		x5,x5,16
+	rev32		v27.16b,v27.16b	/* load res to sha 0, endian swap */
 	sub		x10,x10,1		/* dec num_blocks */
-	cbz		x10,.Lpost_short_loop	/* break if no more */
+	cbz		x10,.Lpost_short_Q2	/* break if no more */
 	/* read next aes block, update aes_ptr_in */
 	ld1		{v2.16b},[x0],16
 	eor		v2.16b,v2.16b,v1.16b	/* xor w/prev value */
@@ -1355,13 +1629,16 @@ aes128cbc_sha256_hmac:
 	aesmc		v2.16b,v2.16b
 	aese		v2.16b,v17.16b
 	eor		v2.16b,v2.16b,v18.16b
-	/* assume this was final block */
-	mov		v29.b[3],w15
+
 	/* save aes res, bump aes_out_ptr */
 	st1		{v2.16b},[x1],16
-	rev32		v28.16b,v2.16b	/* load res to sha 0, endian swap */
+	/* load next 16 bytes for SHA-256 */
+	ld1		{v28.16b},[x3],16
+	/* dec number of bytes of the hash input */
+	sub		x5,x5,16
+	rev32		v28.16b,v28.16b	/* load res to sha 0, endian swap */
 	sub		x10,x10,1		/* dec num_blocks */
-	cbz		x10,.Lpost_short_loop	/* break if no more */
+	cbz		x10,.Lpost_short_Q3	/* break if no more */
 	/* read next aes block, update aes_ptr_in */
 	ld1		{v3.16b},[x0],16
 	eor		v3.16b,v3.16b,v2.16b	/* xor w/ prev value */
@@ -1387,10 +1664,14 @@ aes128cbc_sha256_hmac:
 	aesmc		v3.16b,v3.16b
 	aese		v3.16b,v17.16b
 	eor		v3.16b,v3.16b,v18.16b
-
-	rev32		v29.16b,v3.16b	/* load res to sha 0, endian swap */
 	/* save aes res, bump aes_out_ptr */
 	st1		{v3.16b},[x1],16
+	/* load next 16 bytes for SHA-256 */
+	ld1		{v29.16b},[x3],16
+	/* dec number of bytes of the hash input */
+	sub		x5,x5,16
+	/* load res to sha 0, endian swap */
+	rev32		v29.16b,v29.16b
 /*
  * now we have the sha256 to do for these 4 aes blocks
  */
@@ -1536,17 +1817,254 @@ aes128cbc_sha256_hmac:
 	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
 	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
-	/* assume this was final block */
-	mov		v26.b[3],w15
 
 	sub		x10,x10,1		/* dec num_blocks */
 	cbnz		x10,.Lshort_loop	/* keep looping if more */
+
+.Lpost_short_Q0:
+	/* assume this was final block */
+	mov		v26.b[3],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_short_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	/* overwrite previous v26 value (0x80) */
+	mov		v26.d[0],x2
+	/* assume this was final block */
+	mov		v26.b[11],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_short_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	mov		v26.d[1],x2
+.Lpost_short_Q1:
+	/* zero out vectors */
+	eor		v27.16b,v27.16b,v27.16b
+	eor		v28.16b,v28.16b,v28.16b
+	eor		v29.16b,v29.16b,v29.16b
+	/* assume this is final block */
+	mov		v27.b[3],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_short_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	/* overwrite previous v27 value (0x80) */
+	mov		v27.d[0],x2
+	/* assume this was final block */
+	mov		v27.b[11],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_short_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	mov		v27.d[1],x2
+.Lpost_short_Q2:
+	/* zero out vectors (repeated if came from Q0) */
+	eor		v28.16b,v28.16b,v28.16b
+	eor		v29.16b,v29.16b,v29.16b
+	/* assume this was final block */
+	mov		v28.b[3],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_short_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	/* overwrite previous v28 value (0x80) */
+	mov		v28.d[0],x2
+	/* assume this was final block */
+	mov		v28.b[11],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_short_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	mov		v28.d[1],x2
+.Lpost_short_Q3:
+	/* zero out vector (repeated if came from Q1) */
+	eor		v29.16b,v29.16b,v29.16b
+	/* assume this was final block */
+	mov		v29.b[3],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_short_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	rev32		x2,x2
+	/* overwrite previous v29 value (0x80) */
+	mov		v29.d[0],x2
+	/* assume this was final block */
+	mov		v29.b[11],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,1f
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	rev32		x2,x2
+	mov		v29.d[1],x2
+
+/*
+ * That is enough of blocks, we allow up to 64 bytes in total.
+ * Now we have the sha256 to do for these 4 16B blocks
+ */
+1:
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
+	/* base address for sha round consts */
+	adr		x8,.Lrcon
+	ld1		{v4.16b},[x8],16	/* key0 */
+	ld1		{v5.16b},[x8],16	/* key1 */
+	ld1		{v6.16b},[x8],16	/* key2 */
+	ld1		{v7.16b},[x8],16	/* key3 */
+
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+
+	sha256su0	v26.4s,v27.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
+	sha256h2	q23, q21, v6.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
+	sha256h2	q23, q21, v7.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
+	sha256su0	v26.4s,v27.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
+	sha256h2	q23, q21, v6.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
+	sha256h2	q23, q21, v7.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
+	sha256su0	v26.4s,v27.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+	sha256h2	q23, q21, v6.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	sha256h2	q23, q21, v7.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+	sha256h2	q23, q21, v4.4s
+
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
+	sha256h2	q23, q21, v5.4s
+
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	sha256h2	q23, q21, v6.4s
+
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	sha256h2	q23, q21, v7.4s
+
+	add		v26.4s,v24.4s,v22.4s	/* ABCD += working copy */
+	add		v27.4s,v25.4s,v23.4s	/* EFGH += working copy */
+
+	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
+	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
+
+	/* this was final block */
+	cbz		x5,.Lpost_short_loop
+	subs		x5,x5,8
+	/* loop if hash is not finished */
+	b.ne		.Lpost_short_Q0
+	/* set "1" of the padding if this was a final block */
+	mov		v26.b[3],w15
+
 /*
  * there are between 0 and 3 aes blocks in the final sha256 blocks
  */
 .Lpost_short_loop:
-	/* Add one SHA-2 block since hash is calculated including i_key_pad */
-	add	x11, x11, #64
+	/* Add outstanding bytes of digest source */
+	add	x11,x11,x12
+	/* Add one SHA-256 block since hash is calculated including i_key_pad */
+	add	x11,x11, #64
 	lsr	x12,x11,32			/* len_hi */
 	and	x13,x11,0xffffffff		/* len_lo */
 	lsl	x12,x12,3			/* len_hi in bits */
