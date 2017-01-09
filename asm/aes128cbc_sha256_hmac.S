@@ -913,9 +913,6 @@ aes128cbc_sha256_hmac:
 	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 
 /* Process remaining 0-3 AES blocks here */
-	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
-	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
-	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
 
 	cbz		x13,.Lpost_long_Q0

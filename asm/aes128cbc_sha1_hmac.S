@@ -858,9 +858,6 @@ aes128cbc_sha1_hmac:
 	add		v24.4s,v24.4s,v20.4s
 
 /* Process remaining 0-3 AES blocks here */
-	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
-	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
-	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
 
 	cbz		x13,.Lpost_long_Q0
