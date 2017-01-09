@@ -1166,8 +1166,8 @@ aes128cbc_sha256_hmac:
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
 
-	add		v26.4s,v24.4s,v22.4s	/* ABCD += working copy */
-	add		v27.4s,v25.4s,v23.4s	/* EFGH += working copy */
+	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
+	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 
 	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
 	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
@@ -2038,8 +2038,8 @@ aes128cbc_sha256_hmac:
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
 
-	add		v26.4s,v24.4s,v22.4s	/* ABCD += working copy */
-	add		v27.4s,v25.4s,v23.4s	/* EFGH += working copy */
+	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
+	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 
 	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
 	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
