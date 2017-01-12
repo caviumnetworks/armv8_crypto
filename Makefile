@@ -68,5 +68,3 @@ $(OBJDIR):
 
 libarmv8_crypto.a: $(OBJS)
 	ar -rcs $@ $(OBJDIR)/*.o
-
-include $(RTE_SDK)/mk/rte.lib.mk
