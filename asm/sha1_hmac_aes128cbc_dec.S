@@ -92,10 +92,14 @@
  *
  * Constraints:
  *
- * The variable "len" must be a multiple of 16,
- * otherwise results are not defined. For AES partial blocks the user
- * is required to pad the input to modulus 16 = 0.
+ * The variable "clen" must be a multiple of 16, otherwise results are not
+ * defined. For AES partial blocks the user is required to pad the input
+ * to modulus 16 = 0.
  *
+ * The variable "dlen" must be a multiple of 8 and greater or equal
+ * to "clen". The maximum difference between "dlen" and "clen" cannot
+ * exceed 64 bytes. This constrain is strictly related to the needs of the IPSec
+ * ESP packet.
  * Short lengths are less optimized at < 16 AES blocks,
  * however they are somewhat optimized, and more so than the enc/auth versions.
  */
@@ -134,37 +138,46 @@ sha1_hmac_aes128cbc_dec:
  */
 	prfm		PLDL1KEEP,[x0,0]	/* pref next *in */
 	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
+	subs		x10,x5,x2
+	b.lt		.Lerror			/* error: dlen < clen */
+	cmp		x10,#64
+	b.hi		.Lerror			/* error: dlen - clen > 64 */
+	ands		x10,x5,#0x7		/* check 8B alignment */
+	b.ne		.Lerror			/* error: dlen % 8 != 0 */
 	lsr		x10,x2,4		/* aes_blocks = len/16 */
 	cmp		x10,16			/* no main loop if <16 */
 	blt		.Lshort_cases		/* branch if < 12 */
 
+	/* base address for sha round consts */
+	adr		x8,.Lrcon
+	ldp		q4,q5,[x8],32		/* key0,key1 */
+	ldp		q6,q7,[x8],32		/* key2,key3 */
+
+	/* get outstanding bytes of the digest */
+	sub		x8,x5,x2
+
 	mov		x11,x2			/* len -> x11 needed at end */
 	ld1		{v30.16b},[x6]		/* get 1st ivec */
 	lsr		x12,x11,6		/* total_blocks (sha) */
-	ld1		{v26.16b},[x3],16	/* next w0 */
-	ld1		{v27.16b},[x3],16	/* next w1 */
-	ld1		{v28.16b},[x3],16	/* next w2 */
-	ld1		{v29.16b},[x3],16	/* next w3 */
+	ldp		q26,q27,[x3],32		/* next w0,w1 */
+	rev32		v26.16b,v26.16b		/* endian swap w0 */
+	rev32		v27.16b,v27.16b		/* endian swap w1 */
+	ldp		q28,q29,[x3],32		/* next w1,w2 */
+	rev32		v28.16b,v28.16b		/* endian swap w2 */
+	rev32		v29.16b,v29.16b		/* endian swap w3 */
 
+	/* substract loaded bytes */
+	sub		x5,x5,64
 /*
  * now we can do the loop prolog, 1st sha1 block
  */
 	prfm		PLDL1KEEP,[x0,64]	/* pref next aes_ptr_in */
 	prfm		PLDL1KEEP,[x1,64]	/* pref next aes_ptr_out */
-	/* base address for sha round consts */
-	adr		x8,.Lrcon
 /*
  * do the first sha1 block on the plaintext
  */
 	mov		v20.16b,v24.16b		/* init working ABCD */
-	rev32		v26.16b,v26.16b		/* endian swap w0 */
-	rev32		v27.16b,v27.16b		/* endian swap w1 */
-	rev32		v28.16b,v28.16b		/* endian swap w2 */
-	rev32		v29.16b,v29.16b		/* endian swap w3 */
-	ld1		{v4.16b},[x8],16	/* key0 */
-	ld1		{v5.16b},[x8],16	/* key1 */
-	ld1		{v6.16b},[x8],16	/* key2 */
-	ld1		{v7.16b},[x8],16	/* key3 */
+
 	add		v19.4s,v4.4s,v26.4s
 	add		v23.4s,v4.4s,v27.4s
 /* quad 0 */
@@ -277,6 +290,8 @@ sha1_hmac_aes128cbc_dec:
 	ld1		{v29.16b},[x3],16	/* next w3 */
 	sha1p		q24,s22,v23.4s
 
+	/* substract loaded bytes */
+	sub		x5,x5,64
 /*
  * aes_blocks_left := number after the main (sha) block is done.
  * can be 0 note we account for the extra unwind in main_blocks
@@ -289,6 +304,8 @@ sha1_hmac_aes128cbc_dec:
 	/* next aes block, update aes_ptr_in */
 	ld1		{v31.16b},[x0],16
 
+	/* indicate AES blocks to write back */
+	mov		x9,xzr
 /*
  * main combined loop CBC, can be used by auth/enc version
  */
@@ -514,6 +531,8 @@ sha1_hmac_aes128cbc_dec:
 	add		v25.4s,v25.4s,v21.4s
 	/* save aes res, bump aes_out_ptr */
 	st1		{v3.16b},[x1],16
+	/* substract loaded bytes */
+	sub		x5,x5,64
 	/* loop if more to do */
 	cbnz		x15,.Lmain_loop
 /*
@@ -770,8 +789,6 @@ sha1_hmac_aes128cbc_dec:
 	eor		v0.16b,v0.16b,v30.16b	/* xor w/ ivec (modeop) */
 	/* read next aes block, update aes_ptr_in */
 	ld1		{v30.16b},[x0],16
-	/* save aes res, bump aes_out_ptr */
-	st1		{v0.16b},[x1],16
 
 /* aes xform 1 */
 	aesd		v1.16b,v8.16b
@@ -799,8 +816,6 @@ sha1_hmac_aes128cbc_dec:
 	eor		v1.16b,v1.16b,v31.16b	/* xor w/ ivec (modeop) */
 	/* read next aes block, update aes_ptr_in */
 	ld1		{v31.16b},[x0],16
-	/* save aes res, bump aes_out_ptr */
-	st1		{v1.16b},[x1],16
 
 /* aes xform 2 */
 	aesd		v2.16b,v8.16b
@@ -828,8 +843,6 @@ sha1_hmac_aes128cbc_dec:
 	eor		v2.16b,v2.16b,v30.16b	/* xor w/ ivec (modeop) */
 	/* read next aes block, update aes_ptr_in */
 	ld1		{v30.16b},[x0],16
-	/* save aes res, bump aes_out_ptr */
-	st1		{v2.16b},[x1],16
 
 /* aes xform 3 */
 	aesd		v3.16b,v8.16b
@@ -853,8 +866,9 @@ sha1_hmac_aes128cbc_dec:
 	aesd		v3.16b,v17.16b
 	eor		v3.16b,v3.16b,v18.16b	/* res 3 */
 	eor		v3.16b,v3.16b,v31.16b	/* xor w/ ivec (modeop) */
-	/* save aes res, bump aes_out_ptr */
-	st1		{v3.16b},[x1],16
+
+	add		x9,x9,4
+
 /*
  * Now, there is the final b-1 sha1 padded block.
  * This contains between 0-3 aes blocks. We take some pains to avoid read spill
@@ -863,41 +877,236 @@ sha1_hmac_aes128cbc_dec:
  */
 .Ljoin_common:
 	mov		w15,0x80	/* that's the 1 of the pad */
-	cbnz		x13,.Lpad100	/* branch if there is some real data */
+.Lpost_loop_Q0:
 	eor		v26.16b,v26.16b,v26.16b		/* zero the rest */
 	eor		v27.16b,v27.16b,v27.16b		/* zero the rest */
 	eor		v28.16b,v28.16b,v28.16b		/* zero the rest */
 	eor		v29.16b,v29.16b,v29.16b		/* zero the rest */
-	mov		v26.b[0],w15			/* all data is bogus */
-	b		.Lpad_done			/* go do rest */
+	/* assume this was final block */
+	mov		v26.b[0],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	/* overwrite previous v26 value (0x80) */
+	mov		v26.d[0],x2
+	/* assume this was final block */
+	mov		v26.b[8],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	mov		v26.d[1],x2
+.Lpost_loop_Q1:
+	/* zero out vectors */
+	eor		v27.16b,v27.16b,v27.16b
+	eor		v28.16b,v28.16b,v28.16b
+	eor		v29.16b,v29.16b,v29.16b
+	/* assume this is final block */
+	mov		v27.b[0],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	/* overwrite previous v27 value (0x80) */
+	mov		v27.d[0],x2
+	/* assume this was final block */
+	mov		v27.b[8],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	mov		v27.d[1],x2
+.Lpost_loop_Q2:
+	/* zero out vectors (repeated if came from Q0) */
+	eor		v28.16b,v28.16b,v28.16b
+	eor		v29.16b,v29.16b,v29.16b
+	/* assume this was final block */
+	mov		v28.b[0],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	/* overwrite previous v28 value (0x80) */
+	mov		v28.d[0],x2
+	/* assume this was final block */
+	mov		v28.b[8],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	mov		v28.d[1],x2
+.Lpost_loop_Q3:
+	/* zero out vector (repeated if came from Q1) */
+	eor		v29.16b,v29.16b,v29.16b
+	/* assume this was final block */
+	mov		v29.b[0],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,.Lpost_loop
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	sub		x5,x5,8
+	/* overwrite previous v29 value (0x80) */
+	mov		v29.d[0],x2
+	/* assume this was final block */
+	mov		v29.b[8],w15
+	/* outstanding 8B blocks left */
+	cbz		x5,1f
+	/* at least 8B left to go, it is safe to fetch this data */
+	ldr		x2,[x3],8
+	mov		v29.d[1],x2
 
-.Lpad100:
-	sub		x14,x13,1		/* dec amount left */
-	ld1		{v26.16b},[x2],16	/* next w0 */
-	cbnz		x14,.Lpad200	/* branch if there is some real data */
-	eor		v27.16b,v27.16b,v27.16b	/* zero the rest */
-	eor		v28.16b,v28.16b,v28.16b	/* zero the rest */
-	eor		v29.16b,v29.16b,v29.16b	/* zero the rest */
-	mov		v27.b[0],w15		/* all data is bogus */
-	b		.Lpad_done		/* go do rest */
+/*
+ * That is enough of blocks, we allow up to 64 bytes in total.
+ * Now we have the sha1 to do for these 4 16B blocks
+ */
+1:
+	rev32		v26.16b,v26.16b
+	rev32		v27.16b,v27.16b
+	rev32		v28.16b,v28.16b
+	rev32		v29.16b,v29.16b
 
-.Lpad200:
-	sub		x14,x14,1		/* dec amount left */
-	ld1		{v27.16b},[x2],16	/* next w1 */
-	cbnz		x14,.Lpad300	/* branch if there is some real data */
-	eor		v28.16b,v28.16b,v28.16b	/* zero the rest */
-	eor		v29.16b,v29.16b,v29.16b	/* zero the rest */
-	mov		v28.b[0],w15		/* all data is bogus */
-	b		.Lpad_done		/* go do rest */
+	mov		v20.16b,v24.16b		/* working ABCD <- ABCD */
 
-.Lpad300:
-	ld1		{v28.16b},[x2],16	/* next w2 */
-	eor		v29.16b,v29.16b,v29.16b	/* zero the rest */
-	mov		v29.b[3],w15		/* all data is bogus */
+	add		v19.4s,v4.4s,v26.4s
+	sha1h		s22,s24
+	sha1c		q24,s25,v19.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1su1		v26.4s,v29.4s
 
-.Lpad_done:
+	add		v23.4s,v4.4s,v27.4s
+	sha1h		s21,s24
+	sha1c		q24,s22,v23.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1su1		v27.4s,v26.4s
+
+	add		v19.4s,v4.4s,v28.4s
+	sha1h		s22,s24
+	sha1c		q24,s21,v19.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1su1		v28.4s,v27.4s
+
+	add		v23.4s,v4.4s,v29.4s
+	sha1h		s21,s24
+	sha1c		q24,s22,v23.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1su1		v29.4s,v28.4s
+
+	add		v19.4s,v4.4s,v26.4s
+	sha1h		s22,s24
+	sha1c		q24,s21,v19.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1su1		v26.4s,v29.4s
+
+	add		v23.4s,v5.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1su1		v27.4s,v26.4s
+
+	add		v19.4s,v5.4s,v28.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1su1		v28.4s,v27.4s
+
+	add		v23.4s,v5.4s,v29.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1su1		v29.4s,v28.4s
+
+	add		v19.4s,v5.4s,v26.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1su1		v26.4s,v29.4s
+
+	add		v23.4s,v5.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1su1		v27.4s,v26.4s
+
+	add		v19.4s,v6.4s,v28.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1su1		v28.4s,v27.4s
+
+	add		v23.4s,v6.4s,v29.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1su1		v29.4s,v28.4s
+
+	add		v19.4s,v6.4s,v26.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1su1		v26.4s,v29.4s
+
+	add		v23.4s,v6.4s,v27.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1su1		v27.4s,v26.4s
+
+	add		v19.4s,v6.4s,v28.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1su1		v28.4s,v27.4s
+
+	add		v23.4s,v7.4s,v29.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1su1		v29.4s,v28.4s
+
+	add		v19.4s,v7.4s,v26.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+
+	add		v23.4s,v7.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+
+	add		v19.4s,v7.4s,v28.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+
+	add		v23.4s,v7.4s,v29.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+
+	add		v25.4s,v25.4s,v21.4s
+	add		v24.4s,v24.4s,v20.4s
+
+	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
+	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
+
+	/* this was final block */
+	cbz		x5,.Lpost_loop
+	subs		x5,x5,8
+	/* loop if hash is not finished */
+	b.ne		.Lpost_loop_Q0
+	/* set "1" of the padding if this was a final block */
+	mov		v26.b[0],w15
+
+.Lpost_loop:
+	/* Add outstanding bytes of digest source */
+	add		x11,x11,x8
 	/* Add one SHA-1 block since hash is calculated including i_key_pad */
-	add		x11, x11, #64
+	add		x11,x11,#64
 	lsr		x12,x11,32		/* len_hi */
 	and		x14,x11,0xffffffff	/* len_lo */
 	lsl		x12,x12,3		/* len_hi in bits */
@@ -911,6 +1120,15 @@ sha1_hmac_aes128cbc_dec:
 	rev32		v28.16b,v28.16b		/* fix endian w2 */
 
 	mov		v20.16b,v24.16b		/* working ABCD <- ABCD */
+	/* skip write back if there were less than 4 AES blocks */
+	cbz		x9,1f
+	/*
+	 * At this point all data should be fetched for SHA.
+	 * Save remaining blocks without danger of overwriting SHA source.
+	 */
+	stp		q0,q1,[x1],32
+	stp		q2,q3,[x1],32
+1:
 /*
  * final sha block
  * the strategy is to combine the 0-3 aes blocks, which is faster but
@@ -1367,148 +1585,37 @@ sha1_hmac_aes128cbc_dec:
 	ld1		{v16.16b-v18.16b},[x9]		/* rk[8-10] */
 	adr		x8,.Lrcon			/* rcon */
 	lsl		x11,x10,4		/* len = aes_blocks*16 */
-	mov		x2,x0				/* sha_ptr_in = in */
 
 	ld1		{v4.16b},[x8],16		/* key0 */
 	ld1		{v5.16b},[x8],16		/* key1 */
 	ld1		{v6.16b},[x8],16		/* key2 */
 	ld1		{v7.16b},[x8],16		/* key3 */
+	/* get outstanding bytes of the digest */
+	sub		x8,x5,x2
 
-/*
- * This loop does 4 at a time, so that at the end there is a final sha block
- * and 0-3 aes blocks. Note that everything is done serially
- * to avoid complication.
- */
-.Lshort_loop:
+	/* indicate AES blocks to write back */
+	mov		x9,xzr
+
+	mov		x2,x0
+	/*
+	 * Digest source has to be at least of cipher source length
+	 * therefore it is safe to use x10 to indicate whether we can
+	 * overtake cipher processing by 4 AES block here.
+	 */
 	cmp		x10,4			/* check if 4 or more */
 	/* if less, bail to last block */
 	blt		.Llast_sha_block
 
-	ld1		{v31.16b},[x2]		/* next w no update */
-	/* read next aes block, update aes_ptr_in */
-	ld1		{v0.16b},[x2],16
-	rev32		v26.16b,v0.16b		/* endian swap for sha */
-	add		x0,x0,64
+	ldp		q26,q27,[x3],32
+	rev32		v26.16b,v26.16b
+	rev32		v27.16b,v27.16b
+	ldp		q28,q29,[x3],32
+	rev32		v28.16b,v28.16b
+	rev32		v29.16b,v29.16b
 
-/* aes xform 0 */
-	aesd		v0.16b,v8.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v9.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v10.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v11.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v12.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v13.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v14.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v15.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v16.16b
-	aesimc		v0.16b,v0.16b
-	aesd		v0.16b,v17.16b
-	eor		v0.16b,v0.16b,v18.16b
-	eor		v0.16b,v0.16b,v30.16b	/* xor w/ prev value */
-
-	ld1		{v30.16b},[x2]		/* read no update */
-	/* read next aes block, update aes_ptr_in */
-	ld1		{v1.16b},[x2],16
-	rev32		v27.16b,v1.16b		/* endian swap for sha */
-	/* save aes res, bump aes_out_ptr */
-	st1		{v0.16b},[x1],16
-
-/* aes xform 1 */
-	aesd		v1.16b,v8.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v9.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v10.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v11.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v12.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v13.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v14.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v15.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v16.16b
-	aesimc		v1.16b,v1.16b
-	aesd		v1.16b,v17.16b
-	eor		v1.16b,v1.16b,v18.16b
-	eor		v1.16b,v1.16b,v31.16b	/* xor w/ prev value */
-
-	ld1		{v31.16b},[x2]		/* read no update */
-	/* read next aes block, update aes_ptr_in */
-	ld1		{v2.16b},[x2],16
-	rev32		v28.16b,v2.16b		/* endian swap for sha */
-	/* save aes res, bump aes_out_ptr */
-	st1		{v1.16b},[x1],16
-
-/* aes xform 2 */
-	aesd		v2.16b,v8.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v9.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v10.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v11.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v12.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v13.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v14.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v15.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v16.16b
-	aesimc		v2.16b,v2.16b
-	aesd		v2.16b,v17.16b
-	eor		v2.16b,v2.16b,v18.16b
-	eor		v2.16b,v2.16b,v30.16b	/* xor w/ prev value */
-
-	ld1		{v30.16b},[x2]		/* read no update */
-	/* read next aes block, update aes_ptr_in */
-	ld1		{v3.16b},[x2],16
-	rev32		v29.16b,v3.16b		/* endian swap for sha */
-	/* save aes res, bump aes_out_ptr */
-	st1		{v2.16b},[x1],16
-
-/* aes xform 3 */
-	aesd		v3.16b,v8.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v9.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v10.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v11.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v12.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v13.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v14.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v15.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v16.16b
-	aesimc		v3.16b,v3.16b
-	aesd		v3.16b,v17.16b
-	eor		v3.16b,v3.16b,v18.16b
-	eor		v3.16b,v3.16b,v31.16b	/* xor w/ prev value */
-/*
- * now we have the sha1 to do for these 4 aes blocks. Note that.
- */
+	sub		x5,x5,64
 
 	mov		v20.16b,v24.16b		/* working ABCD <- ABCD */
-	/* save aes res, bump aes_out_ptr */
-	st1		{v3.16b},[x1],16
 /* quad 0 */
 	add		v19.4s,v4.4s,v26.4s
 	sha1h		s22,s24
@@ -1625,7 +1732,263 @@ sha1_hmac_aes128cbc_dec:
 	add		v25.4s,v25.4s,v21.4s
 	add		v24.4s,v24.4s,v20.4s
 
+	/* there were at least 4 AES blocks to process */
+	b		.Lshort_loop_no_store
+
+.Lshort_loop:
+	cmp		x10,4			/* check if 4 or more */
+	/* if less, bail to last block */
+	blt		.Llast_sha_block
+
+	stp		q0,q1,[x1],32
+	stp		q2,q3,[x1],32
+
+	sub		x9,x9,4
+
+.Lshort_loop_no_store:
+
+	ld1		{v31.16b},[x2]		/* next w no update */
+	/* read next aes block, update aes_ptr_in */
+	ld1		{v0.16b},[x2],16
+
+	add		x0,x0,64
+
+/* aes xform 0 */
+	aesd		v0.16b,v8.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v9.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v10.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v11.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v12.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v13.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v14.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v15.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v16.16b
+	aesimc		v0.16b,v0.16b
+	aesd		v0.16b,v17.16b
+	eor		v0.16b,v0.16b,v18.16b
+	eor		v0.16b,v0.16b,v30.16b	/* xor w/ prev value */
+
+	ld1		{v30.16b},[x2]		/* read no update */
+	/* read next aes block, update aes_ptr_in */
+	ld1		{v1.16b},[x2],16
+
+/* aes xform 1 */
+	aesd		v1.16b,v8.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v9.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v10.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v11.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v12.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v13.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v14.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v15.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v16.16b
+	aesimc		v1.16b,v1.16b
+	aesd		v1.16b,v17.16b
+	eor		v1.16b,v1.16b,v18.16b
+	eor		v1.16b,v1.16b,v31.16b	/* xor w/ prev value */
+
+	ld1		{v31.16b},[x2]		/* read no update */
+	/* read next aes block, update aes_ptr_in */
+	ld1		{v2.16b},[x2],16
+
+/* aes xform 2 */
+	aesd		v2.16b,v8.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v9.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v10.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v11.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v12.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v13.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v14.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v15.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v16.16b
+	aesimc		v2.16b,v2.16b
+	aesd		v2.16b,v17.16b
+	eor		v2.16b,v2.16b,v18.16b
+	eor		v2.16b,v2.16b,v30.16b	/* xor w/ prev value */
+
+	ld1		{v30.16b},[x2]		/* read no update */
+	/* read next aes block, update aes_ptr_in */
+	ld1		{v3.16b},[x2],16
+
+/* aes xform 3 */
+	aesd		v3.16b,v8.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v9.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v10.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v11.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v12.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v13.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v14.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v15.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v16.16b
+	aesimc		v3.16b,v3.16b
+	aesd		v3.16b,v17.16b
+	eor		v3.16b,v3.16b,v18.16b
+	eor		v3.16b,v3.16b,v31.16b	/* xor w/ prev value */
+
+	add		x9,x9,4
+
 	sub		x10,x10,4		/* 4 less */
+	cmp		x5,64
+	b.lt		.Lshort_loop		/* keep looping */
+
+	ldp		q26,q27,[x3],32
+	rev32		v26.16b,v26.16b
+	rev32		v27.16b,v27.16b
+	ldp		q28,q29,[x3],32
+	rev32		v28.16b,v28.16b
+	rev32		v29.16b,v29.16b
+
+	sub		x5,x5,64
+
+	mov		v20.16b,v24.16b		/* working ABCD <- ABCD */
+/* quad 0 */
+	add		v19.4s,v4.4s,v26.4s
+	sha1h		s22,s24
+	sha1c		q24,s25,v19.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1su1		v26.4s,v29.4s
+
+	add		v23.4s,v4.4s,v27.4s
+	sha1h		s21,s24
+	sha1c		q24,s22,v23.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1su1		v27.4s,v26.4s
+
+	add		v19.4s,v4.4s,v28.4s
+	sha1h		s22,s24
+	sha1c		q24,s21,v19.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1su1		v28.4s,v27.4s
+
+	add		v23.4s,v4.4s,v29.4s
+	sha1h		s21,s24
+	sha1c		q24,s22,v23.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1su1		v29.4s,v28.4s
+
+	add		v19.4s,v4.4s,v26.4s
+	sha1h		s22,s24
+	sha1c		q24,s21,v19.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1su1		v26.4s,v29.4s
+/* quad 1 */
+	add		v23.4s,v5.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1su1		v27.4s,v26.4s
+
+	add		v19.4s,v5.4s,v28.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1su1		v28.4s,v27.4s
+
+	add		v23.4s,v5.4s,v29.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1su1		v29.4s,v28.4s
+
+	add		v19.4s,v5.4s,v26.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1su1		v26.4s,v29.4s
+
+	add		v23.4s,v5.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1su1		v27.4s,v26.4s
+/* quad 2 */
+	add		v19.4s,v6.4s,v28.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1su1		v28.4s,v27.4s
+
+	add		v23.4s,v6.4s,v29.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1su1		v29.4s,v28.4s
+
+	add		v19.4s,v6.4s,v26.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1su1		v26.4s,v29.4s
+
+	add		v23.4s,v6.4s,v27.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1su1		v27.4s,v26.4s
+
+	add		v19.4s,v6.4s,v28.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1su1		v28.4s,v27.4s
+
+	add		v23.4s,v7.4s,v29.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1su1		v29.4s,v28.4s
+/* quad 3 */
+	add		v19.4s,v7.4s,v26.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+
+	add		v23.4s,v7.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+
+	add		v19.4s,v7.4s,v28.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+
+	add		v23.4s,v7.4s,v29.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+
+	add		v25.4s,v25.4s,v21.4s
+	add		v24.4s,v24.4s,v20.4s
+
 	b		.Lshort_loop		/* keep looping */
 /*
  * this is arranged so that we can join the common unwind code
