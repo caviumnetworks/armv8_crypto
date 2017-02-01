@@ -51,9 +51,39 @@ struct crypto_arg {
 
 typedef struct crypto_arg crypto_arg_t;
 
+/*
+ * Direct assembly calls
+ */
 void aes128_key_sched_enc(uint8_t *expanded_key, const uint8_t *user_key);
 void aes128_key_sched_dec(uint8_t *expanded_key, const uint8_t *user_key);
 
+int sha1_block_partial(uint8_t *init, const uint8_t *src, uint8_t *dst,
+			uint64_t len);
+int sha1_block(uint8_t *init, const uint8_t *src, uint8_t *dst, uint64_t len);
+
+int sha256_block_partial(uint8_t *init, const uint8_t *src, uint8_t *dst,
+			uint64_t len);
+int sha256_block(uint8_t *init, const uint8_t *src, uint8_t *dst, uint64_t len);
+
+/*
+ * Assembly calls for the interface
+ */
+int asm_aes128cbc_sha1_hmac(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
+			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
+			crypto_arg_t *arg);
+int asm_aes128cbc_sha256_hmac(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
+			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
+			crypto_arg_t *arg);
+int asm_sha1_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
+			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
+			crypto_arg_t *arg);
+int asm_sha256_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
+			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
+			crypto_arg_t *arg);
+
+/*
+ * C interface calls
+ */
 int aes128cbc_sha1_hmac(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
 			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
 			crypto_arg_t *arg);
@@ -67,12 +97,5 @@ int sha256_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
 			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
 			crypto_arg_t *arg);
 
-int sha1_block_partial(uint8_t *init, const uint8_t *src, uint8_t *dst,
-			uint64_t len);
-int sha1_block(uint8_t *init, const uint8_t *src, uint8_t *dst, uint64_t len);
-
-int sha256_block_partial(uint8_t *init, const uint8_t *src, uint8_t *dst,
-			uint64_t len);
-int sha256_block(uint8_t *init, const uint8_t *src, uint8_t *dst, uint64_t len);
 
 #endif /* _ARMV8_DEFS_H_ */

@@ -43,13 +43,13 @@
  * return_hash_ptr = SHA1(o_key_pad | SHA1(i_key_pad | out))
  *
  * Prototype:
- * int aes128cbc_sha1_hmac(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
+ * int asm_aes128cbc_sha1_hmac(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
  *			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
  *			crypto_arg_t *arg)
  *
  * Registers used:
  *
- * aes128cbc_sha1_hmac(
+ * asm_aes128cbc_sha1_hmac(
  *	csrc,			x0	(cipher src address)
  *	cdst,			x1	(cipher dst address)
  *	clen			x2	(cipher length)
@@ -99,8 +99,8 @@
 	.file "aes128cbc_sha1_hmac.S"
 	.text
 	.cpu generic+fp+simd+crypto+crc
-	.global aes128cbc_sha1_hmac
-	.type	aes128cbc_sha1_hmac,%function
+	.global asm_aes128cbc_sha1_hmac
+	.type	asm_aes128cbc_sha1_hmac,%function
 
 
 	.align	4
@@ -110,7 +110,7 @@
 	.word		0x8f1bbcdc, 0x8f1bbcdc, 0x8f1bbcdc, 0x8f1bbcdc
 	.word		0xca62c1d6, 0xca62c1d6, 0xca62c1d6, 0xca62c1d6
 
-aes128cbc_sha1_hmac:
+asm_aes128cbc_sha1_hmac:
 /* protect registers */
 	sub		sp,sp,8*16
 	mov		x9,sp			/* copy for address mode */
@@ -132,10 +132,6 @@ aes128cbc_sha1_hmac:
  */
 	prfm		PLDL1KEEP,[x0,0]	/* pref next aes_ptr_in */
 	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
-	cmp		x5,x2			/* compare lengths */
-	b.lt		.Lerror			/* error: dlen < clen */
-	ands		x10,x5,#0x7		/* check 8B alignment */
-	b.ne		.Lerror			/* error: dlen % 8 != 0 */
 	lsr		x10,x2,4		/* aes_blocks = len/16 */
 	cmp		x10,12			/* no main loop if <12 */
 	b.lt		.Lshort_cases		/* branch if < 12 */
@@ -2198,13 +2194,4 @@ aes128cbc_sha1_hmac:
 	mov		x0, xzr
 	ret
 
-.Lerror:
-	mov		x9,sp
-	add		sp,sp,8*16
-	ld1		{v8.16b - v11.16b},[x9],4*16
-	ld1		{v12.16b - v15.16b},[x9]
-
-	mov		x0, #-1
-	ret
-
-	.size	aes128cbc_sha1_hmac, .-aes128cbc_sha1_hmac
+	.size	asm_aes128cbc_sha1_hmac, .-asm_aes128cbc_sha1_hmac

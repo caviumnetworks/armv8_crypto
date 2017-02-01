@@ -44,13 +44,13 @@
  *
  * Prototype:
  *
- * void sha256_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
+ * void asm_sha256_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
  *			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
  *			crypto_arg_t *arg)
  *
  * Registers used:
  *
- * sha256_hmac_aes128cbc_dec(
+ * asm_sha256_hmac_aes128cbc_dec(
  *	csrc,			x0	(cipher src address)
  *	cdst,			x1	(cipher dst address)
  *	clen			x2	(cipher length)
@@ -99,8 +99,8 @@
 	.file "sha256_hmac_aes128cbc_dec.S"
 	.text
 	.cpu generic+fp+simd+crypto+crc
-	.global sha256_hmac_aes128cbc_dec
-	.type	sha256_hmac_aes128cbc_dec,%function
+	.global asm_sha256_hmac_aes128cbc_dec
+	.type	asm_sha256_hmac_aes128cbc_dec,%function
 
 
 	.align	4
@@ -126,7 +126,7 @@
 	.word		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a
 	.word		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
 
-sha256_hmac_aes128cbc_dec:
+asm_sha256_hmac_aes128cbc_dec:
 /* protect registers */
 	sub		sp,sp,8*16
 	sub		sp,sp,2*8
@@ -152,12 +152,6 @@ sha256_hmac_aes128cbc_dec:
 	/* address of sha init state consts */
 	adr		x12,.Linit_sha_state
 	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
-	subs		x10,x5,x2
-	b.lt		.Lerror			/* error: dlen < clen */
-	cmp		x10,#64
-	b.hi		.Lerror			/* error: dlen - clen > 64 */
-	ands		x10,x5,#0x7		/* check 8B alignment */
-	b.ne		.Lerror			/* error: dlen % 8 != 0 */
 	lsr		x10,x2,4		/* aes_blocks = len/16 */
 	cmp		x10,16			/* no main loop if <16 */
 	blt		.Lshort_cases		/* branch if < 12 */
@@ -2218,15 +2212,4 @@ sha256_hmac_aes128cbc_dec:
 	mov		x13,x10			/* copy aes blocks for common */
 	b		.Ljoin_common		/* join common code */
 
-.Lerror:
-	mov		x9,sp
-	add		sp,sp,8*16
-	add		sp,sp,2*8
-	ld1		{v8.16b - v11.16b},[x9],4*16
-	ld1		{v12.16b - v15.16b},[x9]
-	ldp		x19,x20,[x9]
-
-	mov		x0, #-1
-	ret
-
-	.size	sha256_hmac_aes128cbc_dec, .-sha256_hmac_aes128cbc_dec
+	.size	asm_sha256_hmac_aes128cbc_dec, .-asm_sha256_hmac_aes128cbc_dec

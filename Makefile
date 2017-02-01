@@ -30,24 +30,28 @@
 #   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 
-SRCDIR := ${CURDIR}/asm
+SRCDIR := ${CURDIR}
 OBJDIR := ${CURDIR}/obj
 # build flags
 CC = gcc
 CFLAGS += -O3
 CFLAGS += -Wall -static
-CFLAGS += -I$(SRCDIR)/include
+CFLAGS += -I$(SRCDIR)/asm/include
 
+# library c files
+SRCS += $(SRCDIR)/interface.c
 # library asm files
-SRCS += $(SRCDIR)/aes_core.S
-SRCS += $(SRCDIR)/sha1_core.S
-SRCS += $(SRCDIR)/sha256_core.S
-SRCS += $(SRCDIR)/aes128cbc_sha1_hmac.S
-SRCS += $(SRCDIR)/aes128cbc_sha256_hmac.S
-SRCS += $(SRCDIR)/sha1_hmac_aes128cbc_dec.S
-SRCS += $(SRCDIR)/sha256_hmac_aes128cbc_dec.S
+SRCS += $(SRCDIR)/asm/aes_core.S
+SRCS += $(SRCDIR)/asm/sha1_core.S
+SRCS += $(SRCDIR)/asm/sha256_core.S
+SRCS += $(SRCDIR)/asm/aes128cbc_sha1_hmac.S
+SRCS += $(SRCDIR)/asm/aes128cbc_sha256_hmac.S
+SRCS += $(SRCDIR)/asm/sha1_hmac_aes128cbc_dec.S
+SRCS += $(SRCDIR)/asm/sha256_hmac_aes128cbc_dec.S
 
 OBJS  := $(SRCS:.S=.o)
+OBJS  += $(SRCS:.c=.o)
+
 # runtime generated assembly symbols
 all: libarmv8_crypto.a
 
@@ -63,6 +67,9 @@ $(OBJDIR):
 	mkdir $(OBJDIR)
 
 %.o: %.S $(OBJDIR) assym.s
+	$(CC) $(CFLAGS) -c $< -o $(OBJDIR)/$(notdir $@)
+
+%.o: %.c $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $(OBJDIR)/$(notdir $@)
 
 

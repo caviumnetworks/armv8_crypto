@@ -44,13 +44,13 @@
  *
  * Prototype:
  *
- * void sha1_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst,
+ * void asm_sha1_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst,
  *			uint8_t *dsrc, uint8_t *ddst,
  *			uint64_t len, crypto_arg_t *arg)
  *
  * Registers used:
  *
- * sha1_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
+ * asm_sha1_hmac_aes128cbc_dec(uint8_t *csrc, uint8_t *cdst, uint64_t clen,
  *			uint8_t *dsrc, uint8_t *ddst, uint64_t dlen,
  *			crypto_arg_t *arg)
  *
@@ -106,8 +106,8 @@
 	.file "sha1_hmac_aes128cbc_dec.S"
 	.text
 	.cpu generic+fp+simd+crypto+crc
-	.global sha1_hmac_aes128cbc_dec
-	.type	sha1_hmac_aes128cbc_dec,%function
+	.global asm_sha1_hmac_aes128cbc_dec
+	.type	asm_sha1_hmac_aes128cbc_dec,%function
 
 
 	.align	4
@@ -117,7 +117,7 @@
 	.word		0x8f1bbcdc, 0x8f1bbcdc, 0x8f1bbcdc, 0x8f1bbcdc
 	.word		0xca62c1d6, 0xca62c1d6, 0xca62c1d6, 0xca62c1d6
 
-sha1_hmac_aes128cbc_dec:
+asm_sha1_hmac_aes128cbc_dec:
 /* protect registers */
 	sub		sp,sp,8*16
 	mov		x9,sp			/* copy for address mode */
@@ -138,12 +138,6 @@ sha1_hmac_aes128cbc_dec:
  */
 	prfm		PLDL1KEEP,[x0,0]	/* pref next *in */
 	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
-	subs		x10,x5,x2
-	b.lt		.Lerror			/* error: dlen < clen */
-	cmp		x10,#64
-	b.hi		.Lerror			/* error: dlen - clen > 64 */
-	ands		x10,x5,#0x7		/* check 8B alignment */
-	b.ne		.Lerror			/* error: dlen % 8 != 0 */
 	lsr		x10,x2,4		/* aes_blocks = len/16 */
 	cmp		x10,16			/* no main loop if <16 */
 	blt		.Lshort_cases		/* branch if < 12 */
@@ -1998,13 +1992,4 @@ sha1_hmac_aes128cbc_dec:
 	mov		x13,x10			/* copy aes blocks for common */
 	b		.Ljoin_common		/* join common code */
 
-.Lerror:
-	mov		x9,sp
-	add		sp,sp,8*16
-	ld1		{v8.16b - v11.16b},[x9],4*16
-	ld1		{v12.16b - v15.16b},[x9]
-
-	mov		x0, #-1
-	ret
-
-	.size	sha1_hmac_aes128cbc_dec, .-sha1_hmac_aes128cbc_dec
+	.size	asm_sha1_hmac_aes128cbc_dec, .-asm_sha1_hmac_aes128cbc_dec
