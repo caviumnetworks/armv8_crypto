@@ -128,14 +128,23 @@ asm_aes128cbc_sha256_hmac:
 /* protect registers */
 	sub		sp,sp,8*16
 	mov		x9,sp			/* copy for address mode */
-	st1		{v8.16b - v11.16b},[x9],4*16
-	st1		{v12.16b - v15.16b},[x9]
+	stp		q8,q9,[x9],32
 /* fetch args */
 	ldr		x7, [x6, #HMAC_IKEYPAD]
 	/* init ABCD, EFGH. */
-	ld1		{v24.4s, v25.4s},[x7]
+	ldp		q24,q25,[x7]
 	/* save pointer to o_key_pad partial hash */
 	ldr		x7, [x6, #HMAC_OKEYPAD]
+
+	stp		q10,q11,[x9],32
+
+	/* address of sha init state consts */
+	adr		x12,.Linit_sha_state
+	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
+	lsr		x10,x2,4		/* aes_blocks = len/16 */
+
+	stp		q12,q13,[x9],32
+	stp		q14,q15,[x9]
 
 	ldr		x9, [x6, #CIPHER_KEY]
 	ldr		x6, [x6, #CIPHER_IV]
@@ -145,10 +154,6 @@ asm_aes128cbc_sha256_hmac:
  * Note that the output is prefetched as a load, for the in-place case
  */
 	prfm		PLDL1KEEP,[x0,0]	/* pref next aes_ptr_in */
-	/* address of sha init state consts */
-	adr		x12,.Linit_sha_state
-	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
-	lsr		x10,x2,4		/* aes_blocks = len/16 */
 	cmp		x10,12			/* no main loop if <12 */
 	b.lt		.Lshort_cases		/* branch if < 12 */
 
@@ -768,32 +773,33 @@ asm_aes128cbc_sha256_hmac:
 .Lbm2fromQ0:
 	/* base address for sha round consts */
 	adr		x8,.Lrcon
+
 	ld1		{v4.16b},[x8],16	/* key0 */
 	ld1		{v5.16b},[x8],16	/* key1 */
-	ld1		{v6.16b},[x8],16	/* key2 */
-	ld1		{v7.16b},[x8],16	/* key3 */
 
 	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
 
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key2 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key3 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
@@ -806,30 +812,30 @@ asm_aes128cbc_sha256_hmac:
 .Lbm2fromQ1:
 	ld1		{v4.16b},[x8],16	/* key4 */
 	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
 
 	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
@@ -842,30 +848,30 @@ asm_aes128cbc_sha256_hmac:
 .Lbm2fromQ2:
 	ld1		{v4.16b},[x8],16	/* key4 */
 	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
 
 	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
@@ -1036,122 +1042,124 @@ asm_aes128cbc_sha256_hmac:
  * Now we have the sha256 to do for these 4 16B blocks
  */
 1:
-	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
-	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
 	/* base address for sha round consts */
 	adr		x8,.Lrcon
+
 	ld1		{v4.16b},[x8],16	/* key0 */
 	ld1		{v5.16b},[x8],16	/* key1 */
+
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+
+	sha256su0	v26.4s,v27.4s
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
 	ld1		{v6.16b},[x8],16	/* key2 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
 	ld1		{v7.16b},[x8],16	/* key3 */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
-
-	sha256su0	v26.4s,v27.4s
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v4.4s
-	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
-	sha256su1	v26.4s,v28.4s,v29.4s
-
-	sha256su0	v27.4s,v28.4s
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v5.4s
-	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
 	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
-	sha256su0	v28.4s,v29.4s
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v6.4s
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
-	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
+	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
 	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
-	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
-	sha256su1	v28.4s,v26.4s,v27.4s
-
-	sha256su0	v29.4s,v26.4s
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
-	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	ld1		{v7.16b},[x8],16	/* key7 */
 	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+	mov		v21.16b, v22.16b	/* copy abcd */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
+
+	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256h2	q23, q21, v5.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
@@ -1161,12 +1169,11 @@ asm_aes128cbc_sha256_hmac:
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
-
-	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
-	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 
 	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
 	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
 
@@ -1194,126 +1201,127 @@ asm_aes128cbc_sha256_hmac:
 /*
  * do last sha of pad block
  */
-	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
-	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
-/* quad 0 */
 	/* base address for sha round consts */
 	adr		x8,.Lrcon
+
+/* quad 0 */
 	ld1		{v4.16b},[x8],16	/* key0 */
 	ld1		{v5.16b},[x8],16	/* key1 */
-	ld1		{v6.16b},[x8],16	/* key2 */
-	ld1		{v7.16b},[x8],16	/* key3 */
 
 	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
 
 	sha256su0	v26.4s,v27.4s
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
+	ld1		{v6.16b},[x8],16	/* key2 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
+	ld1		{v7.16b},[x8],16	/* key3 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 2 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
-	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
 	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 3 */
+	ldp		q6,q7,[x8],32		/* key6,key7 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v4.4s
 	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+
+	sha256h		q22, q23, v4.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256h2	q23, q21, v4.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256h2	q23, q21, v5.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
@@ -1333,10 +1341,7 @@ asm_aes128cbc_sha256_hmac:
 	/* base address for sha round consts */
 	adr		x8,.Lrcon
 	/* load o_key_pad partial hash */
-	ld1		{v24.16b,v25.16b}, [x7]
-
-	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
-	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
+	ldp		q24,q25,[x7]
 
 	/* Set padding 1 to the first reg */
 	mov		w11, #0x80		/* that's the 1 of the pad */
@@ -1346,160 +1351,149 @@ asm_aes128cbc_sha256_hmac:
 	lsl		x11, x11, 3
 	/* move length to the end of the block */
 	mov		v29.s[3], w11
-
-	ld1		{v4.16b},[x8],16	/* key0 */
-	ld1		{v5.16b},[x8],16	/* key1 */
-	ld1		{v6.16b},[x8],16	/* key2 */
-	ld1		{v7.16b},[x8],16	/* key3 */
-
-	mov		v21.16b, v22.16b	/* copy abcd */
+	ldp		q4,q5,[x8],32		/* key0,key1 */
+	lsr		x11, x11, 32
+	mov		v29.s[2], w11		/* and the higher part */
 
 	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+
+	sha256su0	v26.4s,v27.4s
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	sha256su0	v26.4s,v27.4s
-	sha256su1	v26.4s,v28.4s,v29.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
+	ld1		{v6.16b},[x8],16	/* key2 */
 	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	sha256su0	v27.4s,v28.4s
-	sha256su1	v27.4s,v29.4s,v26.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
+	ld1		{v7.16b},[x8],16	/* key3 */
 	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
-	sha256su0	v28.4s,v29.4s
-	sha256su1	v28.4s,v26.4s,v27.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
-	sha256h		q22, q23, v7.4s
-	sha256h2	q23, q21, v7.4s
-	sha256su0	v29.4s,v26.4s
-	sha256su1	v29.4s,v27.4s,v28.4s
-
 	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	sha256h2	q23, q21, v7.4s
 	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
 	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	sha256su0	v26.4s,v27.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	sha256su0	v26.4s,v27.4s
-	sha256su1	v26.4s,v28.4s,v29.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
+	ld1		{v6.16b},[x8],16	/* key6 */
 	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
-	sha256h		q22, q23, v5.4s
-	sha256h2	q23, q21, v5.4s
-	sha256su0	v27.4s,v28.4s
-	sha256su1	v27.4s,v29.4s,v26.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
-	sha256h		q22, q23, v6.4s
-	sha256h2	q23, q21, v6.4s
-	sha256su0	v28.4s,v29.4s
-	sha256su1	v28.4s,v26.4s,v27.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
-	sha256h		q22, q23, v7.4s
-	sha256h2	q23, q21, v7.4s
-	sha256su0	v29.4s,v26.4s
-	sha256su1	v29.4s,v27.4s,v28.4s
-
-	ld1		{v4.16b},[x8],16	/* key8 */
-	ld1		{v5.16b},[x8],16	/* key9 */
-	ld1		{v6.16b},[x8],16	/* key10 */
-	ld1		{v7.16b},[x8],16	/* key11 */
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key8+w0 */
-	sha256h		q22, q23, v4.4s
-	sha256h2	q23, q21, v4.4s
-	sha256su0	v26.4s,v27.4s
 	sha256su1	v26.4s,v28.4s,v29.4s
 
+	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v5.4s,v5.4s,v27.4s	/* wk = key9+w1 */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	sha256su0	v27.4s,v28.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
+	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v6.4s,v6.4s,v28.4s	/* wk = key10+w2 */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
-	sha256su0	v28.4s,v29.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
+	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v7.4s,v7.4s,v29.4s	/* wk = key11+w3 */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
-	sha256su0	v29.4s,v26.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
-	ld1		{v4.16b},[x8],16	/* key12 */
-	ld1		{v5.16b},[x8],16	/* key13 */
-	ld1		{v6.16b},[x8],16	/* key14 */
-	ld1		{v7.16b},[x8],16	/* key15 */
-
+	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key12+w0 */
 	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	ldp		q6,q7,[x8],32		/* key6,key7 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	mov		v21.16b, v22.16b	/* copy abcd */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+
+	sha256h		q22, q23, v4.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256h2	q23, q21, v4.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v5.4s,v5.4s,v27.4s	/* wk = key13+w1 */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v6.4s,v6.4s,v28.4s	/* wk = key14+w2 */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
 
-	mov		v21.16b, v22.16b	/* copy abcd */
+	mov		x9,sp
+	add		sp,sp,8*16
+	ldp		q8,q9,[x9],32
+	ldp		q10,q11,[x9],32
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key15+w3 */
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
+
+	ldp		q12,q13,[x9],32
+	ldp		q14,q15,[x9]
+
+	mov		x0, xzr
 
 	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
 	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 
 	rev32		v24.16b, v24.16b
 	rev32		v25.16b, v25.16b
-	st1		{v24.4s,v25.4s},[x4]	/* save them both */
 
-	mov		x9,sp
-	add		sp,sp,8*16
-	ld1		{v8.16b - v11.16b},[x9],4*16
-	ld1		{v12.16b - v15.16b},[x9]
+	stp		q24,q25,[x4]		/* save them both */
 
-	mov		x0, xzr
 	ret
 
 /*
@@ -1508,17 +1502,19 @@ asm_aes128cbc_sha256_hmac:
  */
 .Lshort_cases:
 	ld1		{v3.16b},[x6]			/* get ivec */
-	ld1		{v8.16b-v11.16b},[x9],64	/* rk[0-3] */
-	ld1		{v12.16b-v15.16b},[x9],64	/* rk[4-7] */
-	ld1		{v16.16b-v18.16b},[x9]		/* rk[8-10] */
-	mov		w15,0x80			/* sha padding word */
-
-	lsl		x11,x10,4		/* len = aes_blocks*16 */
-
+	ldp		q8,q9,[x9],32			/* rk[0-1] */
 	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	ldp		q10,q11,[x9],32			/* rk[2-3] */
 	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	ldp		q12,q13,[x9],32			/* rk[3-4] */
 	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
+	ldp		q14,q15,[x9],32			/* rk[5-6] */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
+	ldp		q16,q17,[x9],32			/* rk[7-8] */
+	mov		w15,0x80			/* sha padding word */
+	lsl		x11,x10,4		/* len = aes_blocks*16 */
+	ld1		{v18.16b},[x9]			/* rk[9] */
+
 	/* get outstanding bytes of the digest */
 	sub		x12,x5,x2
 /*
@@ -1668,126 +1664,121 @@ asm_aes128cbc_sha256_hmac:
 /*
  * now we have the sha256 to do for these 4 aes blocks
  */
-	mov	v22.16b,v24.16b			/* working ABCD <- ABCD */
-	mov	v23.16b,v25.16b			/* working EFGH <- EFGH */
 
 /* quad 0 */
 	ld1		{v4.16b},[x8],16	/* key0 */
 	ld1		{v5.16b},[x8],16	/* key1 */
-	ld1		{v6.16b},[x8],16	/* key2 */
-	ld1		{v7.16b},[x8],16	/* key3 */
 
 	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 
 	sha256su0	v26.4s,v27.4s
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key2 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key3 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 1 */
-	ld1		{v4.16b},[x8],16	/* key4 */
-	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
-
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 2 */
-	ld1		{v4.16b},[x8],16	/* key4 */
-	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
-
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 3 */
-	ld1		{v4.16b},[x8],16	/* key4 */
-	ld1		{v5.16b},[x8],16	/* key5 */
 	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
 	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	ld1		{v7.16b},[x8],16	/* key7 */
 	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+	mov		v21.16b, v22.16b	/* copy abcd */
 	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 
-	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
 
@@ -1803,15 +1794,14 @@ asm_aes128cbc_sha256_hmac:
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
 
-	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
-	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
-
 	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
 	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
+	sub		x10,x10,1		/* dec num_blocks */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
 
-	sub		x10,x10,1		/* dec num_blocks */
 	cbnz		x10,.Lshort_loop	/* keep looping if more */
 
 .Lpost_short_Q0:
@@ -1908,122 +1898,124 @@ asm_aes128cbc_sha256_hmac:
  * Now we have the sha256 to do for these 4 16B blocks
  */
 1:
-	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
-	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
 	/* base address for sha round consts */
 	adr		x8,.Lrcon
+
 	ld1		{v4.16b},[x8],16	/* key0 */
 	ld1		{v5.16b},[x8],16	/* key1 */
+
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+
+	sha256su0	v26.4s,v27.4s
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
 	ld1		{v6.16b},[x8],16	/* key2 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
 	ld1		{v7.16b},[x8],16	/* key3 */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
-
-	sha256su0	v26.4s,v27.4s
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v4.4s
-	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
-	sha256su1	v26.4s,v28.4s,v29.4s
-
-	sha256su0	v27.4s,v28.4s
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v5.4s
-	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
 	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
-	sha256su0	v28.4s,v29.4s
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v6.4s
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
-	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	ld1		{v4.16b},[x8],16	/* key4 */
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	ld1		{v5.16b},[x8],16	/* key5 */
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
+	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
 	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
-	sha256h2	q23, q21, v6.4s
-	ld1		{v6.16b},[x8],16	/* key6 */
-	sha256su1	v28.4s,v26.4s,v27.4s
-
-	sha256su0	v29.4s,v26.4s
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v7.4s
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
-	sha256h2	q23, q21, v7.4s
-	ld1		{v7.16b},[x8],16	/* key7 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
-	mov		v21.16b, v22.16b	/* copy abcd */
-	sha256h		q22, q23, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	ld1		{v7.16b},[x8],16	/* key7 */
 	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+	mov		v21.16b, v22.16b	/* copy abcd */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
+
+	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256h2	q23, q21, v5.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
@@ -2033,12 +2025,11 @@ asm_aes128cbc_sha256_hmac:
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
-
-	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
-	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 
 	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
 	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
 
@@ -2067,128 +2058,124 @@ asm_aes128cbc_sha256_hmac:
 	mov	v29.s[2],w12			/* len_hi */
 
 /* do final block */
-	mov	v22.16b,v24.16b			/* working ABCD <- ABCD */
-	mov	v23.16b,v25.16b			/* working EFGH <- EFGH */
+
+	/* base address for sha round consts */
+	adr		x8,.Lrcon		/* top of rcon */
 
 /* quad 0 */
-	adr		x8,.Lrcon		/* top of rcon */
 	ld1		{v4.16b},[x8],16	/* key0 */
 	ld1		{v5.16b},[x8],16	/* key1 */
-	ld1		{v6.16b},[x8],16	/* key2 */
-	ld1		{v7.16b},[x8],16	/* key3 */
 
 	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 
 	sha256su0	v26.4s,v27.4s
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key2 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key3 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 1 */
-	ld1		{v4.16b},[x8],16	/* key4 */
-	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
-
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 2 */
-	ld1		{v4.16b},[x8],16	/* key4 */
-	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
-	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
-
 	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
 	sha256su1	v26.4s,v28.4s,v29.4s
 
 	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
 	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
 	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
 /* quad 3 */
-	ld1		{v4.16b},[x8],16	/* key4 */
-	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+	ldp		q6,q7,[x8],32		/* key6,key7 */
 	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
-	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
-
 	mov		v21.16b, v22.16b	/* copy abcd */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+
 	sha256h		q22, q23, v4.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256h2	q23, q21, v4.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
@@ -2212,10 +2199,7 @@ asm_aes128cbc_sha256_hmac:
 	/* base address for sha round consts */
 	adr		x8,.Lrcon
 	/* load o_key_pad partial hash */
-	ld1		{v24.16b,v25.16b}, [x7]
-
-	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
-	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
+	ldp		q24,q25,[x7]
 
 	/* Set padding 1 to the first reg */
 	mov		w11, #0x80		/* that's the 1 of the pad */
@@ -2225,162 +2209,149 @@ asm_aes128cbc_sha256_hmac:
 	lsl		x11, x11, 3
 	/* move length to the end of the block */
 	mov		v29.s[3], w11
+	ldp		q4,q5,[x8],32		/* key0,key1 */
 	lsr		x11, x11, 32
 	mov		v29.s[2], w11		/* and the higher part */
 
-	ld1		{v4.16b},[x8],16	/* key0 */
-	ld1		{v5.16b},[x8],16	/* key1 */
-	ld1		{v6.16b},[x8],16	/* key2 */
-	ld1		{v7.16b},[x8],16	/* key3 */
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
 	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+
+	sha256su0	v26.4s,v27.4s
+	mov		v22.16b,v24.16b		/* working ABCD <- ABCD */
+	mov		v23.16b,v25.16b		/* working EFGH <- EFGH */
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	sha256su0	v26.4s,v27.4s
-	sha256su1	v26.4s,v28.4s,v29.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
+	ld1		{v6.16b},[x8],16	/* key2 */
 	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	sha256su0	v27.4s,v28.4s
-	sha256su1	v27.4s,v29.4s,v26.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
+	ld1		{v7.16b},[x8],16	/* key3 */
 	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
-	sha256su0	v28.4s,v29.4s
-	sha256su1	v28.4s,v26.4s,v27.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
-	sha256h		q22, q23, v7.4s
-	sha256h2	q23, q21, v7.4s
-	sha256su0	v29.4s,v26.4s
-	sha256su1	v29.4s,v27.4s,v28.4s
-
 	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	sha256h2	q23, q21, v7.4s
 	ld1		{v5.16b},[x8],16	/* key5 */
-	ld1		{v6.16b},[x8],16	/* key6 */
-	ld1		{v7.16b},[x8],16	/* key7 */
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
 	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	sha256su0	v26.4s,v27.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v4.4s
 	sha256h2	q23, q21, v4.4s
-	sha256su0	v26.4s,v27.4s
-	sha256su1	v26.4s,v28.4s,v29.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
+	ld1		{v6.16b},[x8],16	/* key6 */
 	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
-	sha256h		q22, q23, v5.4s
-	sha256h2	q23, q21, v5.4s
-	sha256su0	v27.4s,v28.4s
-	sha256su1	v27.4s,v29.4s,v26.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
-	sha256h		q22, q23, v6.4s
-	sha256h2	q23, q21, v6.4s
-	sha256su0	v28.4s,v29.4s
-	sha256su1	v28.4s,v26.4s,v27.4s
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
-	sha256h		q22, q23, v7.4s
-	sha256h2	q23, q21, v7.4s
-	sha256su0	v29.4s,v26.4s
-	sha256su1	v29.4s,v27.4s,v28.4s
-
-	ld1		{v4.16b},[x8],16	/* key8 */
-	ld1		{v5.16b},[x8],16	/* key9 */
-	ld1		{v6.16b},[x8],16	/* key10 */
-	ld1		{v7.16b},[x8],16	/* key11 */
-
-	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key8+w0 */
-	sha256h		q22, q23, v4.4s
-	sha256h2	q23, q21, v4.4s
-	sha256su0	v26.4s,v27.4s
 	sha256su1	v26.4s,v28.4s,v29.4s
 
+	sha256su0	v27.4s,v28.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v5.4s,v5.4s,v27.4s	/* wk = key9+w1 */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
-	sha256su0	v27.4s,v28.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
 	sha256su1	v27.4s,v29.4s,v26.4s
 
+	sha256su0	v28.4s,v29.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v6.4s,v6.4s,v28.4s	/* wk = key10+w2 */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
-	sha256su0	v28.4s,v29.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
 	sha256su1	v28.4s,v26.4s,v27.4s
 
+	sha256su0	v29.4s,v26.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v7.4s,v7.4s,v29.4s	/* wk = key11+w3 */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
-	sha256su0	v29.4s,v26.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key4+w0 */
 	sha256su1	v29.4s,v27.4s,v28.4s
 
-	ld1		{v4.16b},[x8],16	/* key12 */
-	ld1		{v5.16b},[x8],16	/* key13 */
-	ld1		{v6.16b},[x8],16	/* key14 */
-	ld1		{v7.16b},[x8],16	/* key15 */
-
+	sha256su0	v26.4s,v27.4s
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v4.4s,v4.4s,v26.4s	/* wk = key12+w0 */
 	sha256h		q22, q23, v4.4s
+	sha256h2	q23, q21, v4.4s
+	ld1		{v6.16b},[x8],16	/* key6 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key5+w1 */
+	sha256su1	v26.4s,v28.4s,v29.4s
+
+	sha256su0	v27.4s,v28.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v5.4s
+	sha256h2	q23, q21, v5.4s
+	ld1		{v7.16b},[x8],16	/* key7 */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key6+w2 */
+	sha256su1	v27.4s,v29.4s,v26.4s
+
+	sha256su0	v28.4s,v29.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v6.4s
+	sha256h2	q23, q21, v6.4s
+	ld1		{v4.16b},[x8],16	/* key4 */
+	add		v7.4s,v7.4s,v29.4s	/* wk = key7+w3 */
+	sha256su1	v28.4s,v26.4s,v27.4s
+
+	sha256su0	v29.4s,v26.4s
+	mov		v21.16b, v22.16b	/* copy abcd */
+	sha256h		q22, q23, v7.4s
+	sha256h2	q23, q21, v7.4s
+	ld1		{v5.16b},[x8],16	/* key5 */
+	add		v4.4s,v4.4s,v26.4s	/* wk = key0+w0 */
+	sha256su1	v29.4s,v27.4s,v28.4s
+
+	ldp		q6,q7,[x8],32		/* key6,key7 */
+	add		v5.4s,v5.4s,v27.4s	/* wk = key1+w1 */
+	mov		v21.16b, v22.16b	/* copy abcd */
+	add		v6.4s,v6.4s,v28.4s	/* wk = key2+w2 */
+
+	sha256h		q22, q23, v4.4s
+	add		v7.4s,v7.4s,v29.4s	/* wk = key3+w3 */
 	sha256h2	q23, q21, v4.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v5.4s,v5.4s,v27.4s	/* wk = key13+w1 */
 	sha256h		q22, q23, v5.4s
 	sha256h2	q23, q21, v5.4s
 
 	mov		v21.16b, v22.16b	/* copy abcd */
-
-	add		v6.4s,v6.4s,v28.4s	/* wk = key14+w2 */
 	sha256h		q22, q23, v6.4s
 	sha256h2	q23, q21, v6.4s
 
-	mov		v21.16b, v22.16b	/* copy abcd */
+	mov		x9,sp
+	add		sp,sp,8*16
+	ldp		q8,q9,[x9],32
+	ldp		q10,q11,[x9],32
 
-	add		v7.4s,v7.4s,v29.4s	/* wk = key15+w3 */
+	mov		v21.16b, v22.16b	/* copy abcd */
 	sha256h		q22, q23, v7.4s
 	sha256h2	q23, q21, v7.4s
+
+	ldp		q12,q13,[x9],32
+	ldp		q14,q15,[x9]
+
+	mov		x0, xzr
 
 	add		v24.4s,v24.4s,v22.4s	/* ABCD += working copy */
 	add		v25.4s,v25.4s,v23.4s	/* EFGH += working copy */
 
 	rev32		v24.16b, v24.16b
 	rev32		v25.16b, v25.16b
-	st1		{v24.4s,v25.4s},[x4]	/* save them both */
 
-	mov		x9,sp
-	add		sp,sp,8*16
-	ld1		{v8.16b - v11.16b},[x9],4*16
-	ld1		{v12.16b - v15.16b},[x9]
+	stp		q24,q25,[x4]		/* save them both */
 
-	mov		x0, xzr
 	ret
 
 	.size	asm_aes128cbc_sha256_hmac, .-asm_aes128cbc_sha256_hmac
