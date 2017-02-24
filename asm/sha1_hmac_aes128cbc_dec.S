@@ -121,14 +121,22 @@ asm_sha1_hmac_aes128cbc_dec:
 /* protect registers */
 	sub		sp,sp,8*16
 	mov		x9,sp			/* copy for address mode */
-	st1		{v8.16b - v11.16b},[x9],4*16
-	st1		{v12.16b - v15.16b},[x9]
+	stp		q8,q9,[x9],32
 /* fetch args */
 	ldr		x7, [x6, #HMAC_IKEYPAD]
 	/* init ABCD, E */
-	ld1		{v24.4s, v25.4s},[x7]
+	ldp		q24,q25,[x7]
 	/* save pointer to o_key_pad partial hash */
 	ldr		x7, [x6, #HMAC_OKEYPAD]
+
+	stp		q10,q11,[x9],32
+
+	prfm		PLDL1KEEP,[x0,0]	/* pref next aes_ptr_in */
+	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
+	lsr		x10,x2,4		/* aes_blocks = len/16 */
+
+	stp		q12,q13,[x9],32
+	stp		q14,q15,[x9]
 
 	ldr		x9, [x6, #CIPHER_KEY]
 	ldr		x6, [x6, #CIPHER_IV]
@@ -136,9 +144,6 @@ asm_sha1_hmac_aes128cbc_dec:
  * init sha state, prefetch, check for small cases.
  * Note that the output is prefetched as a load, for the in-place case
  */
-	prfm		PLDL1KEEP,[x0,0]	/* pref next *in */
-	prfm		PLDL1KEEP,[x1,0]	/* pref next aes_ptr_out */
-	lsr		x10,x2,4		/* aes_blocks = len/16 */
 	cmp		x10,16			/* no main loop if <16 */
 	blt		.Lshort_cases		/* branch if < 12 */
 
@@ -237,15 +242,15 @@ asm_sha1_hmac_aes128cbc_dec:
 	sha1p		q24,s22,v23.4s
 	sha1su1		v27.4s,v26.4s
 /* quad 2 */
-	add		v23.4s,v6.4s,v29.4s
 	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1m		q24,s21,v19.4s
+	add		v23.4s,v6.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
-	add		v19.4s,v6.4s,v26.4s
 	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 	add		v23.4s,v6.4s,v27.4s
 	sha1su0		v26.4s,v27.4s,v28.4s
@@ -266,8 +271,8 @@ asm_sha1_hmac_aes128cbc_dec:
 	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su1		v29.4s,v28.4s
 	add		v19.4s,v7.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
 	sha1h		s22,s24
 	ld1		{v26.16b},[x3],16	/* next w0 */
 	sha1p		q24,s21,v19.4s
@@ -362,9 +367,9 @@ asm_sha1_hmac_aes128cbc_dec:
 	eor		v0.16b,v0.16b,v30.16b	/* xor w/ prev value */
 	/* get next aes block, with update */
 	ld1		{v30.16b},[x0],16
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
 	add		v23.4s,v5.4s,v27.4s
 	sha1su1		v26.4s,v29.4s
 /* aes xform 1, sha quad 1 */
@@ -399,10 +404,10 @@ asm_sha1_hmac_aes128cbc_dec:
 	aesd		v1.16b,v13.16b
 	sha1h		s22,s24
 	add		v19.4s,v5.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	aesimc		v1.16b,v1.16b
 	sha1p		q24,s21,v19.4s
 	aesd		v1.16b,v14.16b
-	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1su1		v26.4s,v29.4s
 	aesimc		v1.16b,v1.16b
 	aesd		v1.16b,v15.16b
@@ -463,9 +468,9 @@ asm_sha1_hmac_aes128cbc_dec:
 	aesimc		v2.16b,v2.16b
 	sha1h		s22,s24
 	aesd		v2.16b,v16.16b
-	sha1m		q24,s21,v19.4s
-	aesimc		v2.16b,v2.16b
 	sha1su0		v28.4s,v29.4s,v26.4s
+	aesimc		v2.16b,v2.16b
+	sha1m		q24,s21,v19.4s
 	aesd		v2.16b,v17.16b
 	sha1su1		v28.4s,v27.4s
 	add		v23.4s,v7.4s,v29.4s
@@ -482,9 +487,9 @@ asm_sha1_hmac_aes128cbc_dec:
 	aesd		v3.16b,v9.16b
 	sha1h		s21,s24
 	aesimc		v3.16b,v3.16b
-	sha1p		q24,s22,v23.4s
-	aesd		v3.16b,v10.16b
 	sha1su0		v29.4s,v26.4s,v27.4s
+	aesd		v3.16b,v10.16b
+	sha1p		q24,s22,v23.4s
 	aesimc		v3.16b,v3.16b
 	sha1su1		v29.4s,v28.4s
 	aesd		v3.16b,v11.16b
@@ -854,9 +859,13 @@ asm_sha1_hmac_aes128cbc_dec:
 	aesd		v3.16b,v14.16b
 	aesimc		v3.16b,v3.16b
 	aesd		v3.16b,v15.16b
+	eor		v26.16b,v26.16b,v26.16b		/* zero the rest */
 	aesimc		v3.16b,v3.16b
+	eor		v27.16b,v27.16b,v27.16b		/* zero the rest */
 	aesd		v3.16b,v16.16b
+	eor		v28.16b,v28.16b,v28.16b		/* zero the rest */
 	aesimc		v3.16b,v3.16b
+	eor		v29.16b,v29.16b,v29.16b		/* zero the rest */
 	aesd		v3.16b,v17.16b
 	eor		v3.16b,v3.16b,v18.16b	/* res 3 */
 	eor		v3.16b,v3.16b,v31.16b	/* xor w/ ivec (modeop) */
@@ -872,10 +881,6 @@ asm_sha1_hmac_aes128cbc_dec:
 .Ljoin_common:
 	mov		w15,0x80	/* that's the 1 of the pad */
 .Lpost_loop_Q0:
-	eor		v26.16b,v26.16b,v26.16b		/* zero the rest */
-	eor		v27.16b,v27.16b,v27.16b		/* zero the rest */
-	eor		v28.16b,v28.16b,v28.16b		/* zero the rest */
-	eor		v29.16b,v29.16b,v29.16b		/* zero the rest */
 	/* assume this was final block */
 	mov		v26.b[0],w15
 	/* outstanding 8B blocks left */
@@ -894,10 +899,6 @@ asm_sha1_hmac_aes128cbc_dec:
 	sub		x5,x5,8
 	mov		v26.d[1],x2
 .Lpost_loop_Q1:
-	/* zero out vectors */
-	eor		v27.16b,v27.16b,v27.16b
-	eor		v28.16b,v28.16b,v28.16b
-	eor		v29.16b,v29.16b,v29.16b
 	/* assume this is final block */
 	mov		v27.b[0],w15
 	/* outstanding 8B blocks left */
@@ -916,9 +917,6 @@ asm_sha1_hmac_aes128cbc_dec:
 	sub		x5,x5,8
 	mov		v27.d[1],x2
 .Lpost_loop_Q2:
-	/* zero out vectors (repeated if came from Q0) */
-	eor		v28.16b,v28.16b,v28.16b
-	eor		v29.16b,v29.16b,v29.16b
 	/* assume this was final block */
 	mov		v28.b[0],w15
 	/* outstanding 8B blocks left */
@@ -937,8 +935,6 @@ asm_sha1_hmac_aes128cbc_dec:
 	sub		x5,x5,8
 	mov		v28.d[1],x2
 .Lpost_loop_Q3:
-	/* zero out vector (repeated if came from Q1) */
-	eor		v29.16b,v29.16b,v29.16b
 	/* assume this was final block */
 	mov		v29.b[0],w15
 	/* outstanding 8B blocks left */
@@ -969,124 +965,123 @@ asm_sha1_hmac_aes128cbc_dec:
 	mov		v20.16b,v24.16b		/* working ABCD <- ABCD */
 
 	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s25,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
-	sha1su1		v26.4s,v29.4s
-
 	add		v23.4s,v4.4s,v27.4s
+	sha1su1		v26.4s,v29.4s
+
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
 	add		v19.4s,v4.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
+	add		v23.4s,v4.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
 
-	add		v23.4s,v4.4s,v29.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
+	add		v19.4s,v4.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
+	add		v23.4s,v5.4s,v27.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v5.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
 	add		v19.4s,v5.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
 	add		v23.4s,v5.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-
 	add		v19.4s,v5.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
+
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
-	sha1su1		v26.4s,v29.4s
-
 	add		v23.4s,v5.4s,v27.4s
-	sha1h		s21,s24
-	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
-	add		v19.4s,v6.4s,v28.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
-	add		v23.4s,v6.4s,v29.4s
-	sha1h		s21,s24
-	sha1m		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-
-	add		v19.4s,v6.4s,v26.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v6.4s,v27.4s
-	sha1h		s21,s24
-	sha1m		q24,s22,v23.4s
 	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
-	add		v19.4s,v6.4s,v28.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
-	add		v23.4s,v7.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v6.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
 	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v7.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
-	sha1p		q24,s21,v19.4s
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v6.4s,v27.4s
+	sha1su1		v26.4s,v29.4s
+
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v7.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	add		v19.4s,v7.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
 
 	add		v23.4s,v7.4s,v27.4s
-	sha1h		s21,s24
-	sha1p		q24,s22,v23.4s
-
-	add		v19.4s,v7.4s,v28.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
 
-	add		v23.4s,v7.4s,v29.4s
+	add		v19.4s,v7.4s,v28.4s
 	sha1h		s21,s24
+	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
+	sha1p		q24,s22,v23.4s
+
+	add		v23.4s,v7.4s,v29.4s
+	sha1h		s22,s24
+	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
+	sha1p		q24,s21,v19.4s
+
+	sha1h		s21,s24
+	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
 	sha1p		q24,s22,v23.4s
 
 	add		v25.4s,v25.4s,v21.4s
-	add		v24.4s,v24.4s,v20.4s
-
-	eor		v26.16b,v26.16b,v26.16b		/* zero sha src 0 */
-	eor		v27.16b,v27.16b,v27.16b		/* zero sha src 1 */
-	eor		v28.16b,v28.16b,v28.16b		/* zero sha src 2 */
 	eor		v29.16b,v29.16b,v29.16b		/* zero sha src 3 */
+	add		v24.4s,v24.4s,v20.4s
 
 	/* this was final block */
 	cbz		x5,.Lpost_loop
@@ -1106,11 +1101,10 @@ asm_sha1_hmac_aes128cbc_dec:
 	lsl		x12,x12,3		/* len_hi in bits */
 	lsl		x14,x14,3		/* len_lo in bits */
 
-	mov		v29.s[3],w14		/* len_lo */
-	mov		v29.s[2],w12		/* len_hi */
-
 	rev32		v26.16b,v26.16b		/* fix endian w0 */
+	mov		v29.s[3],w14		/* len_lo */
 	rev32		v27.16b,v27.16b		/* fix endian w1 */
+	mov		v29.s[2],w12		/* len_hi */
 	rev32		v28.16b,v28.16b		/* fix endian w2 */
 
 	mov		v20.16b,v24.16b		/* working ABCD <- ABCD */
@@ -1175,14 +1169,14 @@ asm_sha1_hmac_aes128cbc_dec:
 	eor		v3.16b,v0.16b,v18.16b	/* res 0 */
 	eor		v3.16b,v3.16b,v30.16b	/* xor w/ ivec (modeop) */
 	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
+	/* save aes res, bump aes_out_ptr */
+	st1		{v3.16b},[x1],16
 	sha1su1		v26.4s,v29.4s
 	/* dec counter */
 	sub		x13,x13,1
-	/* save aes res, bump aes_out_ptr */
-	st1		{v3.16b},[x1],16
 	cbz		x13,.Lfrmquad1
 
 /* aes xform 1 */
@@ -1231,14 +1225,14 @@ asm_sha1_hmac_aes128cbc_dec:
 	eor		v3.16b,v0.16b,v18.16b	/* res 0 */
 	eor		v3.16b,v3.16b,v31.16b	/* xor w/ ivec (modeop) */
 	add		v23.4s,v5.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
+	/* save aes res, bump aes_out_ptr */
+	st1		{v3.16b},[x1],16
 	sha1su1		v27.4s,v26.4s
 
 	sub		x13,x13,1		/* dec counter */
-	/* save aes res, bump aes_out_ptr */
-	st1		{v3.16b},[x1],16
 	cbz		x13,.Lfrmquad2
 
 /* aes xform 2 */
@@ -1286,12 +1280,12 @@ asm_sha1_hmac_aes128cbc_dec:
 	sha1su1		v27.4s,v26.4s
 	eor		v3.16b,v3.16b,v30.16b	/* xor w/ ivec (modeop) */
 	add		v19.4s,v6.4s,v28.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
 	/* save aes res, bump aes_out_ptr */
 	st1		{v3.16b},[x1],16
+	sha1su1		v28.4s,v27.4s
 	b		.Lfrmquad3
 /*
  * the final block with no aes component, i.e from here there were zero blocks
@@ -1300,120 +1294,120 @@ asm_sha1_hmac_aes128cbc_dec:
 .Lzero_aes_blocks_left:
 
 	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s25,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
+	add		v23.4s,v4.4s,v27.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v4.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
+	add		v19.4s,v4.4s,v28.4s
 	sha1su1		v27.4s,v26.4s
 
-	add		v19.4s,v4.4s,v28.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
+	add		v23.4s,v4.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
 
-	add		v23.4s,v4.4s,v29.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
+	add		v19.4s,v4.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1su1		v26.4s,v29.4s
 
 /* quad 1 */
 .Lfrmquad1:
 	add		v23.4s,v5.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
+	add		v19.4s,v5.4s,v28.4s
 	sha1su1		v27.4s,v26.4s
 
-	add		v19.4s,v5.4s,v28.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
+	add		v23.4s,v5.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
 
-	add		v23.4s,v5.4s,v29.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
+	add		v19.4s,v5.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v5.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
+	add		v23.4s,v5.4s,v27.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v5.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1su1		v27.4s,v26.4s
 
 /* quad 2 */
 .Lfrmquad2:
 	add		v19.4s,v6.4s,v28.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
+	add		v23.4s,v6.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
 
-	add		v23.4s,v6.4s,v29.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1m		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
+	add		v19.4s,v6.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v6.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1m		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
+	add		v23.4s,v6.4s,v27.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v6.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1m		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
+	add		v19.4s,v6.4s,v28.4s
 	sha1su1		v27.4s,v26.4s
 
-	add		v19.4s,v6.4s,v28.4s
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1su1		v28.4s,v27.4s
 
 /* quad 3 */
 .Lfrmquad3:
 	add		v23.4s,v7.4s,v29.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
+	add		v19.4s,v7.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v7.4s,v26.4s
+	add		v23.4s,v7.4s,v27.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
 
-	add		v23.4s,v7.4s,v27.4s
+	add		v19.4s,v7.4s,v28.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
 
-	add		v19.4s,v7.4s,v28.4s
+	add		v23.4s,v7.4s,v29.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
 
-	add		v23.4s,v7.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
 
@@ -1440,119 +1434,129 @@ asm_sha1_hmac_aes128cbc_dec:
 	mov		v29.s[2], w11		/* and the higher part */
 
 	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s25,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
-	sha1su1		v26.4s,v29.4s
-
 	add		v23.4s,v4.4s,v27.4s
+	sha1su1		v26.4s,v29.4s
+
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
 	add		v19.4s,v4.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
+	add		v23.4s,v4.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
 
-	add		v23.4s,v4.4s,v29.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
+	add		v19.4s,v4.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
+	add		v23.4s,v5.4s,v27.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v5.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
 	add		v19.4s,v5.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
 	add		v23.4s,v5.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-
 	add		v19.4s,v5.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
+
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
-	sha1su1		v26.4s,v29.4s
-
 	add		v23.4s,v5.4s,v27.4s
-	sha1h		s21,s24
-	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
-	add		v19.4s,v6.4s,v28.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
-	add		v23.4s,v6.4s,v29.4s
-	sha1h		s21,s24
-	sha1m		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-
-	add		v19.4s,v6.4s,v26.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v6.4s,v27.4s
-	sha1h		s21,s24
-	sha1m		q24,s22,v23.4s
 	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
-	add		v19.4s,v6.4s,v28.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
-	add		v23.4s,v7.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v6.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
 	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v7.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
-	sha1p		q24,s21,v19.4s
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v6.4s,v27.4s
+	sha1su1		v26.4s,v29.4s
+
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v7.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	add		v19.4s,v7.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
 
 	add		v23.4s,v7.4s,v27.4s
-	sha1h		s21,s24
-	sha1p		q24,s22,v23.4s
-
-	add		v19.4s,v7.4s,v28.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
 
-	add		v23.4s,v7.4s,v29.4s
+	add		v19.4s,v7.4s,v28.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
 
-	add		v25.4s,v25.4s,v21.4s
+	mov		x9,sp
+	add		sp,sp,8*16
+	ldp		q8,q9,[x9],32
+	ldp		q10,q11,[x9],32
+
+	add		v23.4s,v7.4s,v29.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+
+	ldp		q12,q13,[x9],32
+	ldp		q14,q15,[x9]
+
+	mov		x0, xzr
+
 	add		v24.4s,v24.4s,v20.4s
+	add		v25.4s,v25.4s,v21.4s
 
 	rev32		v24.16b, v24.16b
 	rev32		v25.16b, v25.16b
@@ -1560,12 +1564,6 @@ asm_sha1_hmac_aes128cbc_dec:
 	st1		{v24.16b}, [x4],16
 	st1		{v25.s}[0], [x4]
 
-	mov		x9,sp
-	add		sp,sp,8*16
-	ld1		{v8.16b - v11.16b},[x9],4*16
-	ld1		{v12.16b - v15.16b},[x9]
-
-	mov		x0,xzr
 	ret
 
 /*
@@ -1573,17 +1571,19 @@ asm_sha1_hmac_aes128cbc_dec:
  * x10 = aes_blocks
  */
 .Lshort_cases:
-	ld1		{v30.16b},[x6]			/* get ivec */
-	ld1		{v8.16b-v11.16b},[x9],64	/* rk[0-3] */
-	ld1		{v12.16b-v15.16b},[x9],64	/* rk[4-7] */
-	ld1		{v16.16b-v18.16b},[x9]		/* rk[8-10] */
+	ldp		q8,q9,[x9],32
 	adr		x8,.Lrcon			/* rcon */
+	ldp		q10,q11,[x9],32
 	lsl		x11,x10,4		/* len = aes_blocks*16 */
 
-	ld1		{v4.16b},[x8],16		/* key0 */
-	ld1		{v5.16b},[x8],16		/* key1 */
-	ld1		{v6.16b},[x8],16		/* key2 */
-	ld1		{v7.16b},[x8],16		/* key3 */
+	ldp		q12,q13,[x9],32
+	ldp		q4,q5,[x8],32			/* key0, key1 */
+	ldp		q14,q15,[x9],32
+	ld1		{v30.16b},[x6]			/* get ivec */
+	ldp		q16,q17,[x9],32
+	ldp		q6,q7,[x8]			/* key2, key3 */
+	ld1		{v18.16b},[x9]
+
 	/* get outstanding bytes of the digest */
 	sub		x8,x5,x2
 
@@ -1610,116 +1610,120 @@ asm_sha1_hmac_aes128cbc_dec:
 	sub		x5,x5,64
 
 	mov		v20.16b,v24.16b		/* working ABCD <- ABCD */
+
 /* quad 0 */
 	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s25,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
-	sha1su1		v26.4s,v29.4s
-
 	add		v23.4s,v4.4s,v27.4s
+	sha1su1		v26.4s,v29.4s
+
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
 	add		v19.4s,v4.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
+	add		v23.4s,v4.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
 
-	add		v23.4s,v4.4s,v29.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
+	add		v19.4s,v4.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
+	add		v23.4s,v5.4s,v27.4s
 	sha1su1		v26.4s,v29.4s
+
 /* quad 1 */
-	add		v23.4s,v5.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
 	add		v19.4s,v5.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
 	add		v23.4s,v5.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-
 	add		v19.4s,v5.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
+
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
-	sha1su1		v26.4s,v29.4s
-
 	add		v23.4s,v5.4s,v27.4s
-	sha1h		s21,s24
-	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-/* quad 2 */
-	add		v19.4s,v6.4s,v28.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
-	add		v23.4s,v6.4s,v29.4s
-	sha1h		s21,s24
-	sha1m		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-
-	add		v19.4s,v6.4s,v26.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v6.4s,v27.4s
-	sha1h		s21,s24
-	sha1m		q24,s22,v23.4s
 	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v28.4s
 	sha1su1		v27.4s,v26.4s
 
-	add		v19.4s,v6.4s,v28.4s
+/* quad 2 */
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
+	add		v23.4s,v6.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
 
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
+
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v6.4s,v27.4s
+	sha1su1		v26.4s,v29.4s
+
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
 	add		v23.4s,v7.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-/* quad 3 */
 	add		v19.4s,v7.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
+
+/* quad 3 */
+	add		v23.4s,v7.4s,v27.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-
-	add		v23.4s,v7.4s,v27.4s
-	sha1h		s21,s24
-	sha1p		q24,s22,v23.4s
 
 	add		v19.4s,v7.4s,v28.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+
+	add		v23.4s,v7.4s,v29.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
 
-	add		v23.4s,v7.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
 
@@ -1867,116 +1871,120 @@ asm_sha1_hmac_aes128cbc_dec:
 	sub		x5,x5,64
 
 	mov		v20.16b,v24.16b		/* working ABCD <- ABCD */
+
 /* quad 0 */
 	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s25,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
-	sha1su1		v26.4s,v29.4s
-
 	add		v23.4s,v4.4s,v27.4s
+	sha1su1		v26.4s,v29.4s
+
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
 	add		v19.4s,v4.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
+	add		v23.4s,v4.4s,v29.4s
 	sha1su1		v28.4s,v27.4s
 
-	add		v23.4s,v4.4s,v29.4s
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1c		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
+	add		v19.4s,v4.4s,v26.4s
 	sha1su1		v29.4s,v28.4s
 
-	add		v19.4s,v4.4s,v26.4s
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1c		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
+	add		v23.4s,v5.4s,v27.4s
 	sha1su1		v26.4s,v29.4s
+
 /* quad 1 */
-	add		v23.4s,v5.4s,v27.4s
+	sha1su0		v27.4s,v28.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
 	add		v19.4s,v5.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
 	add		v23.4s,v5.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+	sha1su0		v29.4s,v26.4s,v27.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-
 	add		v19.4s,v5.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
+
+	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
-	sha1su1		v26.4s,v29.4s
-
 	add		v23.4s,v5.4s,v27.4s
-	sha1h		s21,s24
-	sha1p		q24,s22,v23.4s
-	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-/* quad 2 */
-	add		v19.4s,v6.4s,v28.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
-	add		v23.4s,v6.4s,v29.4s
-	sha1h		s21,s24
-	sha1m		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-
-	add		v19.4s,v6.4s,v26.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v26.4s,v27.4s,v28.4s
 	sha1su1		v26.4s,v29.4s
 
-	add		v23.4s,v6.4s,v27.4s
-	sha1h		s21,s24
-	sha1m		q24,s22,v23.4s
 	sha1su0		v27.4s,v28.4s,v29.4s
-	sha1su1		v27.4s,v26.4s
-
-	add		v19.4s,v6.4s,v28.4s
-	sha1h		s22,s24
-	sha1m		q24,s21,v19.4s
-	sha1su0		v28.4s,v29.4s,v26.4s
-	sha1su1		v28.4s,v27.4s
-
-	add		v23.4s,v7.4s,v29.4s
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
-	sha1su0		v29.4s,v26.4s,v27.4s
-	sha1su1		v29.4s,v28.4s
-/* quad 3 */
-	add		v19.4s,v7.4s,v26.4s
+	add		v19.4s,v6.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+/* quad 2 */
+	sha1su0		v28.4s,v29.4s,v26.4s
 	sha1h		s22,s24
-	sha1p		q24,s21,v19.4s
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v6.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
+
+	sha1su0		v26.4s,v27.4s,v28.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v6.4s,v27.4s
+	sha1su1		v26.4s,v29.4s
+
+	sha1su0		v27.4s,v28.4s,v29.4s
+	sha1h		s21,s24
+	sha1m		q24,s22,v23.4s
+	add		v19.4s,v6.4s,v28.4s
+	sha1su1		v27.4s,v26.4s
+
+	sha1su0		v28.4s,v29.4s,v26.4s
+	sha1h		s22,s24
+	sha1m		q24,s21,v19.4s
+	add		v23.4s,v7.4s,v29.4s
+	sha1su1		v28.4s,v27.4s
+
+/* quad 3 */
+	sha1su0		v29.4s,v26.4s,v27.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+	add		v19.4s,v7.4s,v26.4s
+	sha1su1		v29.4s,v28.4s
 
 	add		v23.4s,v7.4s,v27.4s
-	sha1h		s21,s24
-	sha1p		q24,s22,v23.4s
-
-	add		v19.4s,v7.4s,v28.4s
 	sha1h		s22,s24
 	sha1p		q24,s21,v19.4s
 
+	add		v19.4s,v7.4s,v28.4s
+	sha1h		s21,s24
+	sha1p		q24,s22,v23.4s
+
 	add		v23.4s,v7.4s,v29.4s
+	sha1h		s22,s24
+	sha1p		q24,s21,v19.4s
+
 	sha1h		s21,s24
 	sha1p		q24,s22,v23.4s
 
@@ -1989,6 +1997,11 @@ asm_sha1_hmac_aes128cbc_dec:
  * that does the last sha block and the final 0-3 aes blocks
  */
 .Llast_sha_block:
+	eor		v26.16b,v26.16b,v26.16b		/* zero the rest */
+	eor		v27.16b,v27.16b,v27.16b		/* zero the rest */
+	eor		v28.16b,v28.16b,v28.16b		/* zero the rest */
+	eor		v29.16b,v29.16b,v29.16b		/* zero the rest */
+
 	mov		x13,x10			/* copy aes blocks for common */
 	b		.Ljoin_common		/* join common code */
 
