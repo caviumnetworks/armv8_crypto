@@ -37,6 +37,7 @@ CC = gcc
 CFLAGS += -O3
 CFLAGS += -Wall -static
 CFLAGS += -I$(SRCDIR)/asm/include
+#CFLAGS += -I$(SRCDIR)
 
 # library c files
 SRCS += $(SRCDIR)/interface.c
@@ -62,7 +63,7 @@ clean:
 assym.s: genassym.c
 	@$(CC) $(CFLAGS) -O0 -S $< -o - | \
 		awk '($$1 == "<genassym>") { print "#define " $$2 "\t" $$3 }' > \
-		$(SRCDIR)/$@
+		$(SRCDIR)/asm/$@
 $(OBJDIR):
 	mkdir $(OBJDIR)
 
