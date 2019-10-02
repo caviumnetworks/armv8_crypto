@@ -1,0 +1,3 @@
+asm/assym.s
+libarmv8_crypto.a
+obj/
