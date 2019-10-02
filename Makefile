@@ -62,7 +62,7 @@ clean:
 assym.s: genassym.c
 	@$(CC) $(CFLAGS) -O0 -S $< -o - | \
 		awk '($$1 == "<genassym>") { print "#define " $$2 "\t" $$3 }' > \
-		$(SRCDIR)/$@
+		$(SRCDIR)/asm/$@
 $(OBJDIR):
 	mkdir $(OBJDIR)
 
