@@ -37,6 +37,7 @@ CC = gcc
 CFLAGS += -O3
 CFLAGS += -Wall -static
 CFLAGS += -I$(SRCDIR)/asm/include
+#CFLAGS += -I$(SRCDIR)
 
 # library c files
 SRCS += $(SRCDIR)/interface.c
